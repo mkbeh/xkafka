@@ -150,8 +150,8 @@ type ConsumerConfig struct {
 	PollInterval time.Duration `envconfig:"KAFKA_POLL_INTERVAL"`
 	// SuspendProcessingTimeout waiting timeout after batch processing failed (custom property).
 	SuspendProcessingTimeout time.Duration `envconfig:"KAFKA_SUSPEND_PROCESSING_TIMEOUT"`
-	// SuspendCommitingTimeout waiting timeout after commiting failed (custom property).
-	SuspendCommitingTimeout time.Duration `envconfig:"KAFKA_SUSPEND_COMMITING_TIMEOUT"`
+	// SuspendCommitingTimeout waiting timeout after committing failed (custom property).
+	SuspendCommitingTimeout time.Duration `envconfig:"KAFKA_SUSPEND_COMMITTING_TIMEOUT"`
 }
 
 func (cfg *ConsumerConfig) getLogin() string {

@@ -129,7 +129,8 @@ func getSASLMechanism(cfg interface {
 	getLogin() string
 	getPassword() string
 	getSASLMechanism() string
-}) (sasl.Mechanism, error) {
+},
+) (sasl.Mechanism, error) {
 	switch cfg.getSASLMechanism() {
 	case saslPlain:
 		auth := plain.Auth{
