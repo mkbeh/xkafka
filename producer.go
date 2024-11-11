@@ -7,28 +7,32 @@ import (
 
 	kslog "github.com/mkbeh/kafka/pkg/logger"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel"
 )
 
 type Producer struct {
-	logger   *slog.Logger
-	clientID string
-
-	conn        *kgo.Client
-	fmt         *kgo.RecordFormatter
-	promiseFunc func(*kgo.Record, error)
-
+	conn          *kgo.Client
+	fmt           *kgo.RecordFormatter
+	logger        *slog.Logger
+	promiseFunc   func(*kgo.Record, error)
 	clientOptions []kgo.Opt
+	meterOptions  []kotel.MeterOpt
+	tracerOptions []kotel.TracerOpt
 }
 
 func NewProducer(opts ...ProducerOption) (*Producer, error) {
-	c := new(Producer)
+	p := new(Producer)
+
+	p.addMeterOption(kotel.MeterProvider(otel.GetMeterProvider()))
+	p.addTracerOption(kotel.TracerProvider(otel.GetTracerProvider()))
 
 	for _, opt := range opts {
-		opt.apply(c)
+		opt.apply(p)
 	}
 
-	if c.promiseFunc == nil {
-		c.promiseFunc = c.loggingPromise
+	if p.promiseFunc == nil {
+		p.promiseFunc = p.loggingPromise
 	}
 
 	formatter, err := newFormatter()
@@ -36,69 +40,75 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 		return nil, err
 	}
 
-	c.fmt = formatter
-	c.logger = wrapLogger(c.logger, producerComponentValue)
+	p.fmt = formatter
+	p.logger = wrapLogger(p.logger, producerComponentValue)
 
-	c.addClientOption(kgo.WithLogger(kslog.NewKgoAdapter(c.logger)))
-	c.addClientOption(kgo.ClientID(c.clientID))
+	instrumenting := kotel.NewKotel(
+		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),
+	)
 
-	c.conn, err = kgo.NewClient(c.clientOptions...)
+	p.addClientOptions(
+		kgo.WithLogger(kslog.NewKgoAdapter(p.logger)),
+		kgo.WithHooks(instrumenting.Hooks()),
+	)
+
+	p.conn, err = kgo.NewClient(p.clientOptions...)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := c.conn.Ping(context.Background()); err != nil {
+	if err := p.conn.Ping(context.Background()); err != nil {
 		return nil, fmt.Errorf("kafka: %w", err)
 	}
 
-	return c, nil
+	return p, nil
 }
 
-func (c *Producer) Close(ctx context.Context) {
-	if c.conn == nil {
+func (p *Producer) Close(ctx context.Context) {
+	if p.conn == nil {
 		return
 	}
 
-	defer c.conn.Close()
+	defer p.conn.Close()
 
-	err := c.conn.Flush(ctx)
+	err := p.conn.Flush(ctx)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "producer flush error", kslog.Error(err))
+		p.logger.ErrorContext(ctx, "producer flush error", kslog.Error(err))
 	}
 }
 
-func (c *Producer) ProduceAsync(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (p *Producer) ProduceAsync(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
 	if promise == nil {
-		c.conn.Produce(ctx, record, c.promiseFunc)
+		p.conn.Produce(ctx, record, p.promiseFunc)
 	} else {
-		c.conn.Produce(ctx, record, promise)
+		p.conn.Produce(ctx, record, promise)
 	}
 }
 
-func (c *Producer) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
-	return c.produce(ctx, records...)
+func (p *Producer) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
+	return p.produce(ctx, records...)
 }
 
-func (c *Producer) RunInTx(ctx context.Context, record ...*kgo.Record) error {
-	if err := c.conn.BeginTransaction(); err != nil {
+func (p *Producer) RunInTx(ctx context.Context, record ...*kgo.Record) error {
+	if err := p.conn.BeginTransaction(); err != nil {
 		return err
 	}
 
-	if err := c.produce(ctx, record...); err != nil {
-		c.rollback(ctx)
+	if err := p.produce(ctx, record...); err != nil {
+		p.rollback(ctx)
 		return err
 	}
 
-	if err := c.conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
+	if err := p.conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
+func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
 	var err error
-	results := c.conn.ProduceSync(ctx, records...)
+	results := p.conn.ProduceSync(ctx, records...)
 	for _, r := range results {
 		if r.Err != nil {
 			err = r.Err
@@ -110,18 +120,18 @@ func (c *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
 	return err
 }
 
-func (c *Producer) rollback(ctx context.Context) {
-	if err := c.conn.AbortBufferedRecords(ctx); err != nil { // this only happens if ctx is canceled
-		c.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
+func (p *Producer) rollback(ctx context.Context) {
+	if err := p.conn.AbortBufferedRecords(ctx); err != nil { // this only happens if ctx is canceled
+		p.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
 		return
 	}
-	if err := c.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
-		c.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
+	if err := p.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
+		p.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
 		return
 	}
 }
 
-func (c *Producer) loggingPromise(rec *kgo.Record, err error) {
+func (p *Producer) loggingPromise(rec *kgo.Record, err error) {
 	var ctx context.Context
 	if rec.Context == nil {
 		ctx = context.Background()
@@ -129,15 +139,27 @@ func (c *Producer) loggingPromise(rec *kgo.Record, err error) {
 		ctx = rec.Context
 	}
 	if err != nil {
-		c.logger.ErrorContext(ctx, "kafka async producer error",
+		p.logger.ErrorContext(ctx, "kafka async producer error",
 			kslog.Error(err),
-			kslog.Record(c.fmt.AppendRecord(nil, rec)),
+			kslog.Record(p.fmt.AppendRecord(nil, rec)),
 		)
 	} else {
 		// todo: add prometheus
 	}
 }
 
-func (c *Producer) addClientOption(opt kgo.Opt) {
-	c.clientOptions = append(c.clientOptions, opt)
+func (p *Producer) addClientOptions(opts ...kgo.Opt) {
+	p.clientOptions = append(p.clientOptions, opts...)
+}
+
+func (p *Producer) addClientOption(opt kgo.Opt) {
+	p.clientOptions = append(p.clientOptions, opt)
+}
+
+func (p *Producer) addMeterOption(opt kotel.MeterOpt) {
+	p.meterOptions = append(p.meterOptions, opt)
+}
+
+func (p *Producer) addTracerOption(opt kotel.TracerOpt) {
+	p.tracerOptions = append(p.tracerOptions, opt)
 }

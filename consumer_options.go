@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type ConsumerOption interface {
@@ -45,7 +49,10 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 
 func WithConsumerClientID(v string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
-		c.clientID = v
+		if v != "" {
+			c.addClientOptions(kgo.ClientID(v))
+			c.addTracerOption(kotel.ClientID(v))
+		}
 	})
 }
 
@@ -114,11 +121,25 @@ func WithConsumerInstanceID(v string) ConsumerOption {
 
 // --- metrics ---
 
-// todo
+func WithConsumerMeterProvider(provider metric.MeterProvider) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addMeterOption(kotel.MeterProvider(provider))
+	})
+}
 
 // --- tracing ---
 
-// todo
+func WithConsumerTracerProvider(provider trace.TracerProvider) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addTracerOption(kotel.TracerProvider(provider))
+	})
+}
+
+func WithConsumerTracerPropagator(propagator propagation.TextMapPropagator) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addTracerOption(kotel.TracerPropagator(propagator))
+	})
+}
 
 type ConsumerConfig struct {
 	// SeedBrokers sets the seed brokers for the client to use, overriding the

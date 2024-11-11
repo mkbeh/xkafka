@@ -26,3 +26,5 @@ tasks:
         sh: go env GOCACHE
       PWD:
         sh: pwd
+      UID:
+        sh: id -u

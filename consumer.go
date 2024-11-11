@@ -8,6 +8,8 @@ import (
 
 	kslog "github.com/mkbeh/kafka/pkg/logger"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel"
 )
 
 type fetchesHandler = func(ctx context.Context, fetches kgo.Fetches)
@@ -18,7 +20,6 @@ type Consumer struct {
 	conn          *kgo.Client
 	fmt           *kgo.RecordFormatter
 	logger        *slog.Logger
-	clientID      string
 	handleFetches fetchesHandler
 	exitCh        chan struct{}
 
@@ -29,6 +30,9 @@ type Consumer struct {
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
 	suspendCommittingTimeout time.Duration
+
+	meterOptions  []kotel.MeterOpt
+	tracerOptions []kotel.TracerOpt
 
 	pollTicker *time.Ticker
 }
@@ -41,8 +45,15 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 		suspendCommittingTimeout: time.Second * 10,
 	}
 
+	c.addMeterOption(kotel.MeterProvider(otel.GetMeterProvider()))
+	c.addTracerOption(kotel.TracerProvider(otel.GetTracerProvider()))
+
 	for _, opt := range opts {
 		opt.apply(c)
+	}
+
+	if c.handleFetches == nil {
+		return nil, fmt.Errorf("fetches handler must be set")
 	}
 
 	formatter, err := newFormatter()
@@ -53,12 +64,15 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	c.fmt = formatter
 	c.logger = wrapLogger(c.logger, consumerComponentValue)
 
-	if c.handleFetches == nil {
-		return nil, fmt.Errorf("fetches handler must be set")
-	}
+	instrumenting := kotel.NewKotel(
+		kotel.WithMeter(kotel.NewMeter(c.meterOptions...)),
+	)
 
-	c.addClientOption(kgo.WithLogger(kslog.NewKgoAdapter(c.logger)))
-	c.addClientOption(kgo.ClientID(c.clientID))
+	c.addClientOptions(
+		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
+		kgo.WithHooks(instrumenting.Hooks()),
+		kgo.KeepRetryableFetchErrors(),
+	)
 
 	return c, nil
 }
@@ -111,7 +125,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		fetches := c.conn.PollRecords(ctx, c.batchSize)
 		if fetches.IsClientClosed() {
-			c.logger.InfoContext(ctx, "kafka client closed for topic(s)") // todo: add fields
+			c.logger.InfoContext(ctx, "kafka client closed for topic(s)") // todo: add fields from labels
 			return nil
 		}
 
@@ -245,6 +259,18 @@ func (c *Consumer) formatRecords(records ...*kgo.Record) []byte {
 	return buff
 }
 
+func (p *Consumer) addClientOptions(opts ...kgo.Opt) {
+	p.clientOptions = append(p.clientOptions, opts...)
+}
+
 func (c *Consumer) addClientOption(opt kgo.Opt) {
 	c.clientOptions = append(c.clientOptions, opt)
+}
+
+func (p *Consumer) addMeterOption(opt kotel.MeterOpt) {
+	p.meterOptions = append(p.meterOptions, opt)
+}
+
+func (p *Consumer) addTracerOption(opt kotel.TracerOpt) {
+	p.tracerOptions = append(p.tracerOptions, opt)
 }

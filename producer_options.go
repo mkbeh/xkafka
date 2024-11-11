@@ -10,6 +10,10 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl"
 	"github.com/twmb/franz-go/pkg/sasl/plain"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type ProducerOption interface {
@@ -42,7 +46,10 @@ func WithProducerConfig(v *ProducerConfig) ProducerOption {
 
 func WithProducerClientID(v string) ProducerOption {
 	return producerOptionFunc(func(c *Producer) {
-		c.clientID = v
+		if v != "" {
+			c.addClientOptions(kgo.ClientID(v))
+			c.addTracerOption(kotel.ClientID(v))
+		}
 	})
 }
 
@@ -80,11 +87,25 @@ func WithProducerCB(cb func(record *kgo.Record, err error)) ProducerOption {
 
 // --- metrics ---
 
-// todo
+func WithProducerMeterProvider(provider metric.MeterProvider) ProducerOption {
+	return producerOptionFunc(func(c *Producer) {
+		c.addMeterOption(kotel.MeterProvider(provider))
+	})
+}
 
 // --- tracing ---
 
-// todo
+func WithProducerTracerProvider(provider trace.TracerProvider) ProducerOption {
+	return producerOptionFunc(func(c *Producer) {
+		c.addTracerOption(kotel.TracerProvider(provider))
+	})
+}
+
+func WithProducerTracerPropagator(propagator propagation.TextMapPropagator) ProducerOption {
+	return producerOptionFunc(func(c *Producer) {
+		c.addTracerOption(kotel.TracerPropagator(propagator))
+	})
+}
 
 type ProducerConfig struct {
 	// SeedBrokers sets the seed brokers for the client to use, overriding the
