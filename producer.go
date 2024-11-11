@@ -77,12 +77,8 @@ func (p *Producer) Close(ctx context.Context) {
 	}
 }
 
-func (p *Producer) ProduceAsync(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
-	if promise == nil {
-		p.conn.Produce(ctx, record, p.promiseFunc)
-	} else {
-		p.conn.Produce(ctx, record, promise)
-	}
+func (p *Producer) ProduceAsync(ctx context.Context, record *kgo.Record) {
+	p.conn.Produce(ctx, record, p.promiseFunc)
 }
 
 func (p *Producer) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
