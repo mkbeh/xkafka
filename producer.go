@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 
-	kslog "github.com/mkbeh/kafka/pkg/logger"
+	"github.com/mkbeh/kafka/pkg/kprom"
+	"github.com/mkbeh/kafka/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
 	"go.opentelemetry.io/otel"
 )
 
 type Producer struct {
+	clientID      string
 	conn          *kgo.Client
 	fmt           *kgo.RecordFormatter
 	logger        *slog.Logger
@@ -47,9 +49,11 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),
 	)
 
+	prom := kprom.NewMetrics(p.clientID, kprom.ProducerKind, "")
+
 	p.addClientOptions(
 		kgo.WithLogger(kslog.NewKgoAdapter(p.logger)),
-		kgo.WithHooks(instrumenting.Hooks()),
+		kgo.WithHooks(instrumenting.Hooks(), prom),
 	)
 
 	p.conn, err = kgo.NewClient(p.clientOptions...)
@@ -103,17 +107,17 @@ func (p *Producer) RunInTx(ctx context.Context, record ...*kgo.Record) error {
 }
 
 func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
-	var err error
 	results := p.conn.ProduceSync(ctx, records...)
 	for _, r := range results {
 		if r.Err != nil {
-			err = r.Err
+			// producerErrors.WithLabelValues(r.Record.Topic).Inc()
+			p.logger.ErrorContext(ctx, "error produce message sync", kslog.Error(r.Err))
+		} else {
+			// messagesProduced.WithLabelValues(r.Record.Topic).Inc()
 		}
 	}
 
-	// todo: add prometheus
-
-	return err
+	return results.FirstErr()
 }
 
 func (p *Producer) rollback(ctx context.Context) {
@@ -127,20 +131,21 @@ func (p *Producer) rollback(ctx context.Context) {
 	}
 }
 
-func (p *Producer) loggingPromise(rec *kgo.Record, err error) {
+func (p *Producer) loggingPromise(record *kgo.Record, err error) {
 	var ctx context.Context
-	if rec.Context == nil {
+	if record.Context == nil {
 		ctx = context.Background()
 	} else {
-		ctx = rec.Context
+		ctx = record.Context
 	}
 	if err != nil {
+		// producerErrors.WithLabelValues(record.Topic).Inc()
 		p.logger.ErrorContext(ctx, "kafka async producer error",
 			kslog.Error(err),
-			kslog.Record(p.fmt.AppendRecord(nil, rec)),
+			kslog.Record(p.fmt.AppendRecord(nil, record)),
 		)
 	} else {
-		// todo: add prometheus
+		// messagesProduced.WithLabelValues(record.Topic).Inc()
 	}
 }
 
@@ -158,4 +163,8 @@ func (p *Producer) addMeterOption(opt kotel.MeterOpt) {
 
 func (p *Producer) addTracerOption(opt kotel.TracerOpt) {
 	p.tracerOptions = append(p.tracerOptions, opt)
+}
+
+func newFormatter() (*kgo.RecordFormatter, error) {
+	return kgo.NewRecordFormatter("topic: %t, key: %k, msg: %v")
 }

@@ -1,12 +1,6 @@
-# This file contains all available configuration options
-# with their default values.
-
-# options for analysis running
 run:
   # default concurrency is a available CPU number
   # concurrency: 4
-
-  # timeout for analysis, e.g. 30s, 5m, default is 1m
   timeout: 3m
 
   # exit code when at least one issue was found, default is 1
@@ -134,9 +128,7 @@ linters-settings:
     # check all top-level comments, not only declarations
     check-all: false
   godox:
-    # report any comments starting with keywords, this is useful for TODO or FIXME comments that
-    # might be left in the code accidentally and should be resolved before merging
-    keywords: # default keywords are TODO, BUG, and FIXME, these can be overwritten by this setting
+    keywords:
       - NOTE
       - OPTIMIZE # marks code that should be optimized before merging
       - HACK # marks hack-arounds that should be removed before merging

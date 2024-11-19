@@ -45,17 +45,18 @@ func WithProducerConfig(v *ProducerConfig) ProducerOption {
 }
 
 func WithProducerClientID(v string) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
+	return producerOptionFunc(func(p *Producer) {
 		if v != "" {
-			c.addClientOptions(kgo.ClientID(v))
-			c.addTracerOption(kotel.ClientID(v))
+			p.addClientOptions(kgo.ClientID(v))
+			p.addTracerOption(kotel.ClientID(v))
+			p.clientID = v
 		}
 	})
 }
 
 func WithProducerLogger(v *slog.Logger) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
-		c.logger = v
+	return producerOptionFunc(func(p *Producer) {
+		p.logger = v
 	})
 }
 
@@ -88,22 +89,22 @@ func WithProducerCB(cb func(record *kgo.Record, err error)) ProducerOption {
 // --- metrics ---
 
 func WithProducerMeterProvider(provider metric.MeterProvider) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
-		c.addMeterOption(kotel.MeterProvider(provider))
+	return producerOptionFunc(func(p *Producer) {
+		p.addMeterOption(kotel.MeterProvider(provider))
 	})
 }
 
 // --- tracing ---
 
 func WithProducerTracerProvider(provider trace.TracerProvider) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
-		c.addTracerOption(kotel.TracerProvider(provider))
+	return producerOptionFunc(func(p *Producer) {
+		p.addTracerOption(kotel.TracerProvider(provider))
 	})
 }
 
 func WithProducerTracerPropagator(propagator propagation.TextMapPropagator) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
-		c.addTracerOption(kotel.TracerPropagator(propagator))
+	return producerOptionFunc(func(p *Producer) {
+		p.addTracerOption(kotel.TracerPropagator(propagator))
 	})
 }
 
@@ -180,15 +181,15 @@ func getSASLMechanism(cfg interface {
 }
 
 func withProducerBrokers(brokers ...string) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
+	return producerOptionFunc(func(p *Producer) {
 		if len(brokers) > 0 {
-			c.addClientOption(kgo.SeedBrokers(brokers...))
+			p.addClientOption(kgo.SeedBrokers(brokers...))
 		}
 	})
 }
 
 func withProducerSASL(cfg *ProducerConfig) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
+	return producerOptionFunc(func(p *Producer) {
 		if cfg.SASLMechanism == "" {
 			return
 		}
@@ -198,14 +199,14 @@ func withProducerSASL(cfg *ProducerConfig) ProducerOption {
 			return
 		}
 
-		c.addClientOption(kgo.SASL(mechanism))
+		p.addClientOption(kgo.SASL(mechanism))
 	})
 }
 
 func withDefaultProduceTopic(v string) ProducerOption {
-	return producerOptionFunc(func(c *Producer) {
+	return producerOptionFunc(func(p *Producer) {
 		if v != "" {
-			c.addClientOption(kgo.DefaultProduceTopic(v))
+			p.addClientOption(kgo.DefaultProduceTopic(v))
 		}
 	})
 }

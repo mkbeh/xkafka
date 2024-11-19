@@ -24,25 +24,28 @@ func (f consumerOptionFunc) apply(c *Consumer) {
 }
 
 func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
-	return consumerOptionFunc(func(p *Consumer) {
+	return consumerOptionFunc(func(c *Consumer) {
 		if cfg == nil {
 			return
 		}
 
 		opts := []ConsumerOption{
 			withEnabledFlag(cfg.Enabled),
+			withConsumerSkipFatalErrorsFlag(cfg.DisableSkipFatalErrors),
 			withConsumerBrokers(strings.Split(cfg.Brokers, ",")...),
 			withConsumerSASL(cfg),
 			withMaxPollRecords(cfg.MaxPollRecords),
 			withPollInterval(cfg.PollInterval),
 			withSuspendProcessingTimeout(cfg.SuspendProcessingTimeout),
 			withSuspendCommitingTimeout(cfg.SuspendCommitingTimeout),
+			withConsumeRegex(cfg.ConsumeRegex),
 			withConsumeTopics(strings.Split(cfg.Topics, ",")...),
 			withConsumerGroup(cfg.Group),
+			withConsumerInstanceID(cfg.InstanceID),
 		}
 
 		for _, opt := range opts {
-			opt.apply(p)
+			opt.apply(c)
 		}
 	})
 }
@@ -52,6 +55,7 @@ func WithConsumerClientID(v string) ConsumerOption {
 		if v != "" {
 			c.addClientOptions(kgo.ClientID(v))
 			c.addTracerOption(kotel.ClientID(v))
+			c.clientID = v
 		}
 	})
 }
@@ -70,8 +74,8 @@ func WithConsumerLogger(v *slog.Logger) ConsumerOption {
 // broker being dialed and sets the ServerName. In short, it is not necessary
 // to set the ServerName.
 func WithConsumerTLS(tls *tls.Config) ConsumerOption {
-	return consumerOptionFunc(func(p *Consumer) {
-		p.addClientOption(kgo.DialTLSConfig(tls))
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addClientOption(kgo.DialTLSConfig(tls))
 	})
 }
 
@@ -105,16 +109,6 @@ func WithConsumerHandler(handlerFunc HandlerFunc) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if handlerFunc != nil {
 			c.handleFetches = c.handleFetchesEach(handlerFunc)
-		}
-	})
-}
-
-// WithConsumerInstanceID sets the group consumer's instance ID, switching the group member
-// from "dynamic" to "static".
-func WithConsumerInstanceID(v string) ConsumerOption {
-	return consumerOptionFunc(func(c *Consumer) {
-		if v != "" {
-			c.addClientOption(kgo.InstanceID(v))
 		}
 	})
 }
@@ -157,8 +151,14 @@ type ConsumerConfig struct {
 	// Password sasl password for use with the PLAIN and SASL-SCRAM-.. mechanism.
 	Password string `envconfig:"KAFKA_PASSWORD"`
 
-	// Enabled custom option for detecting enabling.
+	// Enabled custom option: detecting enabling.
 	Enabled bool `envconfig:"KAFKA_ENABLED"`
+	// DisableSkipFatalErrors custom option: skip fatal errors while fetching records,
+	// otherwise leave the process.
+	DisableSkipFatalErrors bool `envconfig:"KAFKA_DISABLE_SKIP_FATAL_ERRORS"`
+	// ConsumeRegex sets the client to parse all topics passed to Topics as
+	// regular expressions.
+	ConsumeRegex bool `envconfig:"CONSUME_REGEX"`
 	// Topics adds topics to use for consuming.
 	Topics string `envconfig:"KAFKA_TOPICS"`
 	// Group sets the consumer group for the client to join and consume in.
@@ -166,6 +166,9 @@ type ConsumerConfig struct {
 	Group string `envconfig:"KAFKA_GROUP"`
 	// MaxPollRecords maximum of maxPollRecords total across all fetches.
 	MaxPollRecords int `envconfig:"KAFKA_MAX_POLL_RECORDS"`
+	// InstanceID sets the group consumer's instance ID, switching the group member
+	// from "dynamic" to "static".
+	InstanceID string `envconfig:"KAFKA_INSTANCE_ID"`
 
 	// PollInterval interval between handle batches.
 	PollInterval time.Duration `envconfig:"KAFKA_POLL_INTERVAL"`
@@ -190,6 +193,14 @@ func (cfg *ConsumerConfig) getSASLMechanism() string {
 func withEnabledFlag(v bool) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		c.enabled = v
+	})
+}
+
+func withConsumerSkipFatalErrorsFlag(v bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if v {
+			c.disableSkipFatalErrors = true
+		}
 	})
 }
 
@@ -248,9 +259,18 @@ func withSuspendCommitingTimeout(timeout time.Duration) ConsumerOption {
 	})
 }
 
+func withConsumeRegex(flag bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if flag {
+			c.addClientOption(kgo.ConsumeRegex())
+		}
+	})
+}
+
 func withConsumeTopics(topics ...string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if len(topics) > 0 {
+			c.addClientOptions(kgo.ConsumeRegex())
 			c.addClientOption(kgo.ConsumeTopics(topics...))
 		}
 	})
@@ -263,6 +283,15 @@ func withConsumerGroup(group string) ConsumerOption {
 
 			c.addClientOption(kgo.ConsumerGroup(group))
 			c.addClientOption(kgo.DisableAutoCommit())
+			c.setMetricLabel(groupLabel, group)
+		}
+	})
+}
+
+func withConsumerInstanceID(v string) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if v != "" {
+			c.addClientOption(kgo.InstanceID(v))
 		}
 	})
 }
