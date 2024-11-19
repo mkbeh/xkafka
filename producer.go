@@ -13,7 +13,7 @@ import (
 )
 
 type Producer struct {
-	clientID      string
+	id            string
 	conn          *kgo.Client
 	fmt           *kgo.RecordFormatter
 	logger        *slog.Logger
@@ -49,7 +49,7 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),
 	)
 
-	prom := kprom.NewMetrics(p.clientID, kprom.ProducerKind, "")
+	prom := kprom.NewMetrics(p.id, kprom.ProducerKind, "")
 
 	p.addClientOptions(
 		kgo.WithLogger(kslog.NewKgoAdapter(p.logger)),

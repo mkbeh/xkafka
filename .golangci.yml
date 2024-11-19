@@ -391,7 +391,6 @@ linters:
     - err113
     - stylecheck
     - govet
-    - gomnd
     - mnd
     - unused
     - containedctx

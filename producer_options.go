@@ -49,7 +49,7 @@ func WithProducerClientID(v string) ProducerOption {
 		if v != "" {
 			p.addClientOptions(kgo.ClientID(v))
 			p.addTracerOption(kotel.ClientID(v))
-			p.clientID = v
+			p.id = v
 		}
 	})
 }

@@ -55,7 +55,7 @@ func WithConsumerClientID(v string) ConsumerOption {
 		if v != "" {
 			c.addClientOptions(kgo.ClientID(v))
 			c.addTracerOption(kotel.ClientID(v))
-			c.clientID = v
+			c.id = v
 		}
 	})
 }

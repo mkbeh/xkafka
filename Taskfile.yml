@@ -1,7 +1,7 @@
 version: 3
 
 vars:
-  LINTER_VER: "v1.60.1"
+  LINTER_VER: "v1.62"
   PROTOGEN_VER: "v1-1-3-896cf73d"
 
 tasks:
@@ -14,6 +14,7 @@ tasks:
     desc: "lint"
     cmds:
       - docker run --rm
+        -u $(id -u):$(id -g)
         -v {{.PWD}}:/app
         -v {{.GOCACHE_ENV}}:/go/pkg/mod
         -e GOCACHE=/go/pkg/mod
@@ -26,5 +27,3 @@ tasks:
         sh: go env GOCACHE
       PWD:
         sh: pwd
-      UID:
-        sh: id -u

@@ -17,8 +17,8 @@ import (
 type fetchesHandler = func(ctx context.Context, fetches kgo.Fetches)
 
 type Consumer struct {
-	enabled  bool
-	clientID string
+	enabled bool
+	id      string
 
 	conn                   *kgo.Client
 	fmt                    *kgo.RecordFormatter
@@ -73,7 +73,7 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 		kotel.WithMeter(kotel.NewMeter(c.meterOptions...)),
 	)
 
-	prom := kprom.NewMetrics(c.clientID, kprom.ConsumerKind, c.labels[groupLabel])
+	prom := kprom.NewMetrics(c.id, kprom.ConsumerKind, c.labels[groupLabel])
 
 	c.addClientOptions(
 		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
