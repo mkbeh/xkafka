@@ -42,6 +42,20 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 			withConsumeTopics(strings.Split(cfg.Topics, ",")...),
 			withConsumerGroup(cfg.Group),
 			withConsumerInstanceID(cfg.InstanceID),
+			withConsumerDisableFetchSessions(cfg.DisableFetchSessions),
+			withSessionTimeout(cfg.SessionTimeout),
+			withRebalanceTimeout(cfg.RebalanceTimeout),
+			withHeartbeatInterval(cfg.HeartbeatInterval),
+			withRequireStableFetchOffsets(cfg.RequireStableFetchOffsets),
+			withConsumerRequestTimeoutOverhead(cfg.RequestTimeoutOverhead),
+			withConsumerConnIdleTimeout(cfg.ConnIdleTimeout),
+			withConsumerDialTimeout(cfg.DialTimeout),
+			withConsumerRequestRetries(cfg.RequestRetries),
+			withConsumerRetryTimeout(cfg.RetryTimeout),
+			withConsumerBrokerMaxWriteBytes(cfg.BrokerMaxWriteBytes),
+			withConsumerBrokerMaxReadBytes(cfg.BrokerMaxReadBytes),
+			withConsumerMetadataMaxAge(cfg.MetadataMaxAge),
+			withConsumerMetadataMinAge(cfg.MetadataMinAge),
 		}
 
 		for _, opt := range opts {
@@ -113,6 +127,22 @@ func WithConsumerHandler(handlerFunc HandlerFunc) ConsumerOption {
 	})
 }
 
+// WithConsumeResetOffset sets the offset to start consuming from, or if
+// OffsetOutOfRange is seen while fetching, to restart consuming from.
+func WithConsumeResetOffset(offset kgo.Offset) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addClientOption(kgo.ConsumeResetOffset(offset))
+	})
+}
+
+// WithFetchIsolationLevel sets the "isolation level" used for fetching
+// records.
+func WithFetchIsolationLevel(level kgo.IsolationLevel) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addClientOption(kgo.FetchIsolationLevel(level))
+	})
+}
+
 // --- metrics ---
 
 func WithConsumerMeterProvider(provider metric.MeterProvider) ConsumerOption {
@@ -176,6 +206,60 @@ type ConsumerConfig struct {
 	SuspendProcessingTimeout time.Duration `envconfig:"KAFKA_SUSPEND_PROCESSING_TIMEOUT"`
 	// SuspendCommitingTimeout waiting timeout after committing failed (custom property).
 	SuspendCommitingTimeout time.Duration `envconfig:"KAFKA_SUSPEND_COMMITTING_TIMEOUT"`
+
+	// FetchMaxWait sets the maximum amount of time a broker will wait for a
+	// fetch response to hit the minimum number of required bytes before returning.
+	FetchMaxWait time.Duration `envconfig:"KAFKA_FETCH_MAX_WAIT"`
+	// FetchMaxBytes sets the maximum amount of bytes a broker will try to send
+	// during a fetch.
+	FetchMaxBytes int32 `envconfig:"KAFKA_FETCH_MAX_BYTES"`
+	// FetchMinBytes sets the minimum amount of bytes a broker will try to send
+	// during a fetch.
+	FetchMinBytes int32 `envconfig:"KAFKA_FETCH_MIN_BYTES"`
+	// FetchMaxPartitionBytes sets the maximum amount of bytes that will be
+	// consumed for a single partition in a fetch request.
+	FetchMaxPartitionBytes int32 `envconfig:"KAFKA_FETCH_MAX_PARTITION_BYTES"`
+	// DisableFetchSessions sets the client to not use fetch sessions (Kafka 1.0+).
+	DisableFetchSessions bool `envconfig:"KAFKA_DISABLE_FETCH_SESSIONS"`
+	// SessionTimeout sets how long a member in the group can go between
+	// heartbeats, overriding the default 45,000ms. If a member does not heartbeat
+	// in this timeout, the broker will remove the member from the group and
+	// initiate a rebalance.
+	SessionTimeout time.Duration `envconfig:"KAFKA_SESSION_TIMEOUT"`
+	// RebalanceTimeout sets how long group members are allowed to take when a a
+	// rebalance has begun.
+	RebalanceTimeout time.Duration `envconfig:"KAFKA_REBALANCE_TIMEOUT"`
+	// HeartbeatInterval sets how long a group member goes between heartbeats to
+	// Kafka.
+	HeartbeatInterval time.Duration `envconfig:"KAFKA_HEARTBEAT_INTERVAL"`
+	// RequireStableFetchOffsets sets the group consumer to require "stable" fetch
+	// offsets before consuming from the group.
+	RequireStableFetchOffsets bool `envconfig:"KAFKA_REQUIRE_STABLE_FETCH_OFFS"`
+
+	// RequestTimeoutOverhead uses the given time as overhead while deadlining
+	// requests.
+	RequestTimeoutOverhead time.Duration `envconfig:"REQUEST_TIMEOUT_OVERHEAD"`
+	// ConnIdleTimeout is a rough amount of time to allow connections to idle
+	// before they are closed.
+	ConnIdleTimeout time.Duration `envconfig:"CONN_IDLE_TIMEOUT"`
+	// DialTimeout sets the dial timeout.
+	DialTimeout time.Duration `envconfig:"DIAL_TIMEOUT"`
+	// RequestRetries sets the number of tries that retryable requests are allowed.
+	RequestRetries *int `envconfig:"REQUEST_RETRIES"`
+	// RetryTimeout sets the upper limit on how long we allow a request to be
+	// issued and then reissued on failure. That is, this control the total
+	// end-to-end maximum time we allow for trying a request.
+	RetryTimeout time.Duration `envconfig:"RETRY_TIMEOUT"`
+	// BrokerMaxWriteBytes upper bounds the number of bytes written to a broker
+	// connection in a single write.
+	BrokerMaxWriteBytes *int32 `envconfig:"KAFKA_MAX_WRITE_BYTES"`
+	// BrokerMaxReadBytes sets the maximum response size that can be read from
+	// Kafka.
+	BrokerMaxReadBytes *int32 `envconfig:"KAFKA_MAX_READ_BYTES"`
+	// MetadataMaxAge sets the maximum age for the client's cached metadata.
+	MetadataMaxAge time.Duration `envconfig:"METADATA_MAX_AGE"`
+	// MetadataMinAge sets the minimum time between metadata queries.
+	MetadataMinAge time.Duration `envconfig:"METADATA_MIN_AGE"`
 }
 
 func (cfg *ConsumerConfig) getLogin() string {
@@ -292,6 +376,116 @@ func withConsumerInstanceID(v string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if v != "" {
 			c.addClientOption(kgo.InstanceID(v))
+		}
+	})
+}
+
+func withConsumerDisableFetchSessions(flag bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if flag {
+			c.addClientOption(kgo.DisableFetchSessions())
+		}
+	})
+}
+
+func withSessionTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.addClientOption(kgo.SessionTimeout(timeout))
+		}
+	})
+}
+
+func withRebalanceTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.addClientOption(kgo.RebalanceTimeout(timeout))
+		}
+	})
+}
+
+func withHeartbeatInterval(interval time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.addClientOption(kgo.HeartbeatInterval(interval))
+	})
+}
+
+func withRequireStableFetchOffsets(flag bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if flag {
+			c.addClientOption(kgo.RequireStableFetchOffsets())
+		}
+	})
+}
+
+func withConsumerRequestTimeoutOverhead(overhead time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if overhead > 0 {
+			c.addClientOption(kgo.RequestTimeoutOverhead(overhead))
+		}
+	})
+}
+
+func withConsumerConnIdleTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.addClientOption(kgo.ConnIdleTimeout(timeout))
+		}
+	})
+}
+
+func withConsumerDialTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.addClientOption(kgo.DialTimeout(timeout))
+		}
+	})
+}
+
+func withConsumerRequestRetries(n *int) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if n != nil {
+			c.addClientOption(kgo.RequestRetries(*n))
+		}
+	})
+}
+
+func withConsumerRetryTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.addClientOption(kgo.RetryTimeout(timeout))
+		}
+	})
+}
+
+func withConsumerBrokerMaxWriteBytes(v *int32) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if v != nil {
+			c.addClientOption(kgo.BrokerMaxWriteBytes(*v))
+		}
+	})
+}
+
+func withConsumerBrokerMaxReadBytes(v *int32) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if v != nil {
+			c.addClientOption(kgo.BrokerMaxReadBytes(*v))
+		}
+	})
+}
+
+func withConsumerMetadataMaxAge(age time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if age > 0 {
+			c.addClientOption(kgo.MetadataMaxAge(age))
+		}
+	})
+}
+
+func withConsumerMetadataMinAge(age time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if age > 0 {
+			c.addClientOption(kgo.MetadataMinAge(age))
 		}
 	})
 }
