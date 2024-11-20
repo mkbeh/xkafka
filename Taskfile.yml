@@ -2,7 +2,6 @@ version: 3
 
 vars:
   LINTER_VER: "v1.62"
-  PROTOGEN_VER: "v1-1-3-896cf73d"
 
 tasks:
   run:
