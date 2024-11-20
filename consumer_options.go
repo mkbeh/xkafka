@@ -183,12 +183,12 @@ type ConsumerConfig struct {
 
 	// Enabled custom option: detecting enabling.
 	Enabled bool `envconfig:"KAFKA_ENABLED"`
-	// DisableSkipFatalErrors custom option: skip fatal errors while fetching records,
+	// SkipFatalErrors custom option: skip fatal errors while fetching records,
 	// otherwise leave the process.
 	SkipFatalErrors bool `envconfig:"KAFKA_SKIP_FATAL_ERRORS"`
 	// ConsumeRegex sets the client to parse all topics passed to Topics as
 	// regular expressions.
-	ConsumeRegex bool `envconfig:"CONSUME_REGEX"`
+	ConsumeRegex bool `envconfig:"KAFKA_CONSUME_REGEX"`
 	// Topics adds topics to use for consuming.
 	Topics string `envconfig:"KAFKA_TOPICS"`
 	// Group sets the consumer group for the client to join and consume in.
@@ -226,7 +226,7 @@ type ConsumerConfig struct {
 	// in this timeout, the broker will remove the member from the group and
 	// initiate a rebalance.
 	SessionTimeout time.Duration `envconfig:"KAFKA_SESSION_TIMEOUT"`
-	// RebalanceTimeout sets how long group members are allowed to take when a a
+	// RebalanceTimeout sets how long group members are allowed to take when a
 	// rebalance has begun.
 	RebalanceTimeout time.Duration `envconfig:"KAFKA_REBALANCE_TIMEOUT"`
 	// HeartbeatInterval sets how long a group member goes between heartbeats to
@@ -238,18 +238,18 @@ type ConsumerConfig struct {
 
 	// RequestTimeoutOverhead uses the given time as overhead while deadlining
 	// requests.
-	RequestTimeoutOverhead time.Duration `envconfig:"REQUEST_TIMEOUT_OVERHEAD"`
+	RequestTimeoutOverhead time.Duration `envconfig:"KAFKA_REQUEST_TIMEOUT_OVERHEAD"`
 	// ConnIdleTimeout is a rough amount of time to allow connections to idle
 	// before they are closed.
-	ConnIdleTimeout time.Duration `envconfig:"CONN_IDLE_TIMEOUT"`
+	ConnIdleTimeout time.Duration `envconfig:"KAFKA_CONN_IDLE_TIMEOUT"`
 	// DialTimeout sets the dial timeout.
-	DialTimeout time.Duration `envconfig:"DIAL_TIMEOUT"`
+	DialTimeout time.Duration `envconfig:"KAFKA_DIAL_TIMEOUT"`
 	// RequestRetries sets the number of tries that retryable requests are allowed.
-	RequestRetries *int `envconfig:"REQUEST_RETRIES"`
+	RequestRetries *int `envconfig:"KAFKA_REQUEST_RETRIES"`
 	// RetryTimeout sets the upper limit on how long we allow a request to be
 	// issued and then reissued on failure. That is, this control the total
 	// end-to-end maximum time we allow for trying a request.
-	RetryTimeout time.Duration `envconfig:"RETRY_TIMEOUT"`
+	RetryTimeout time.Duration `envconfig:"KAFKA_RETRY_TIMEOUT"`
 	// BrokerMaxWriteBytes upper bounds the number of bytes written to a broker
 	// connection in a single write.
 	BrokerMaxWriteBytes *int32 `envconfig:"KAFKA_MAX_WRITE_BYTES"`
@@ -257,9 +257,9 @@ type ConsumerConfig struct {
 	// Kafka.
 	BrokerMaxReadBytes *int32 `envconfig:"KAFKA_MAX_READ_BYTES"`
 	// MetadataMaxAge sets the maximum age for the client's cached metadata.
-	MetadataMaxAge time.Duration `envconfig:"METADATA_MAX_AGE"`
+	MetadataMaxAge time.Duration `envconfig:"KAFKA_METADATA_MAX_AGE"`
 	// MetadataMinAge sets the minimum time between metadata queries.
-	MetadataMinAge time.Duration `envconfig:"METADATA_MIN_AGE"`
+	MetadataMinAge time.Duration `envconfig:"KAFKA_METADATA_MIN_AGE"`
 }
 
 func (cfg *ConsumerConfig) getLogin() string {

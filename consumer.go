@@ -43,6 +43,7 @@ type Consumer struct {
 
 func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	c := &Consumer{
+		batchSize:                100,
 		skipFatalErrors:          true,
 		exitCh:                   make(chan struct{}),
 		pollInterval:             time.Millisecond * 300,
