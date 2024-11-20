@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/mkbeh/kafka/pkg/kprom"
-	"github.com/mkbeh/kafka/pkg/kslog"
+	"github.com/mkbeh/kafka/internal/pkg/kprom"
+	"github.com/mkbeh/kafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
@@ -20,14 +20,14 @@ type Consumer struct {
 	enabled bool
 	id      string
 
-	conn                   *kgo.Client
-	fmt                    *kgo.RecordFormatter
-	logger                 *slog.Logger
-	handleFetches          fetchesHandler
-	batchSize              int
-	groupSpecified         bool
-	disableSkipFatalErrors bool
-	exitCh                 chan struct{}
+	conn            *kgo.Client
+	fmt             *kgo.RecordFormatter
+	logger          *slog.Logger
+	handleFetches   fetchesHandler
+	batchSize       int
+	groupSpecified  bool
+	skipFatalErrors bool
+	exitCh          chan struct{}
 
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
@@ -43,7 +43,7 @@ type Consumer struct {
 
 func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	c := &Consumer{
-		disableSkipFatalErrors:   true,
+		skipFatalErrors:          true,
 		exitCh:                   make(chan struct{}),
 		pollInterval:             time.Millisecond * 300,
 		suspendProcessingTimeout: time.Second * 30,
@@ -142,7 +142,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			c.logger.ErrorContext(ctx, "error fetching records", kslog.Error(fetchErr.Err))
 			consumerErrs.WithLabelValues(c.labels[groupLabel], fetchErr.Topic).Inc()
 
-			if !kerr.IsRetriable(fetchErr.Err) && c.disableSkipFatalErrors {
+			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
 				return fetchErr.Err
 			}
 		}

@@ -33,6 +33,7 @@ func (l *KgoAdapter) Level() kgo.LogLevel {
 }
 
 func (l *KgoAdapter) Log(level kgo.LogLevel, msg string, keyvals ...any) {
+	//nolint:sloglint // there is no other option to pass the message
 	l.sl.Log(context.Background(), kgoToSlogLevel(level), msg, keyvals...)
 }
 

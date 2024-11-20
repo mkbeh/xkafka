@@ -129,9 +129,9 @@ linters-settings:
     check-all: false
   godox:
     keywords:
-      - NOTE
       - OPTIMIZE # marks code that should be optimized before merging
       - HACK # marks hack-arounds that should be removed before merging
+      - TODO
   gofmt:
     # simplify code: gofmt with `-s` option, true by default
     simplify: true
@@ -373,7 +373,6 @@ linters:
     - durationcheck
     - varnamelen
     - ireturn
-    - execinquery
     - exhaustruct
     - nonamedreturns
     - varnamelen

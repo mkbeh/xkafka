@@ -31,7 +31,7 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 
 		opts := []ConsumerOption{
 			withEnabledFlag(cfg.Enabled),
-			withConsumerSkipFatalErrorsFlag(cfg.DisableSkipFatalErrors),
+			withConsumerSkipFatalErrorsFlag(cfg.SkipFatalErrors),
 			withConsumerBrokers(strings.Split(cfg.Brokers, ",")...),
 			withConsumerSASL(cfg),
 			withMaxPollRecords(cfg.MaxPollRecords),
@@ -155,7 +155,7 @@ type ConsumerConfig struct {
 	Enabled bool `envconfig:"KAFKA_ENABLED"`
 	// DisableSkipFatalErrors custom option: skip fatal errors while fetching records,
 	// otherwise leave the process.
-	DisableSkipFatalErrors bool `envconfig:"KAFKA_DISABLE_SKIP_FATAL_ERRORS"`
+	SkipFatalErrors bool `envconfig:"KAFKA_SKIP_FATAL_ERRORS"`
 	// ConsumeRegex sets the client to parse all topics passed to Topics as
 	// regular expressions.
 	ConsumeRegex bool `envconfig:"CONSUME_REGEX"`
@@ -199,7 +199,7 @@ func withEnabledFlag(v bool) ConsumerOption {
 func withConsumerSkipFatalErrorsFlag(v bool) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if v {
-			c.disableSkipFatalErrors = true
+			c.skipFatalErrors = true
 		}
 	})
 }

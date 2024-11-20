@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/mkbeh/kafka/pkg/kprom"
-	"github.com/mkbeh/kafka/pkg/kslog"
+	"github.com/mkbeh/kafka/internal/pkg/kprom"
+	"github.com/mkbeh/kafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
 	"go.opentelemetry.io/otel"
@@ -110,10 +110,7 @@ func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
 	results := p.conn.ProduceSync(ctx, records...)
 	for _, r := range results {
 		if r.Err != nil {
-			// producerErrors.WithLabelValues(r.Record.Topic).Inc()
 			p.logger.ErrorContext(ctx, "error produce message sync", kslog.Error(r.Err))
-		} else {
-			// messagesProduced.WithLabelValues(r.Record.Topic).Inc()
 		}
 	}
 
@@ -139,13 +136,10 @@ func (p *Producer) loggingPromise(record *kgo.Record, err error) {
 		ctx = record.Context
 	}
 	if err != nil {
-		// producerErrors.WithLabelValues(record.Topic).Inc()
 		p.logger.ErrorContext(ctx, "kafka async producer error",
 			kslog.Error(err),
 			kslog.Record(p.fmt.AppendRecord(nil, record)),
 		)
-	} else {
-		// messagesProduced.WithLabelValues(record.Topic).Inc()
 	}
 }
 

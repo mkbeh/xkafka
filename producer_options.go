@@ -86,6 +86,12 @@ func WithProducerCB(cb func(record *kgo.Record, err error)) ProducerOption {
 	})
 }
 
+func WithProducerRequiredAcks(v kgo.Acks) ProducerOption {
+	return producerOptionFunc(func(p *Producer) {
+		p.addClientOption(kgo.RequiredAcks(v))
+	})
+}
+
 // --- metrics ---
 
 func WithProducerMeterProvider(provider metric.MeterProvider) ProducerOption {

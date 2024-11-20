@@ -3,7 +3,7 @@ package kafka
 import (
 	"log/slog"
 
-	"github.com/mkbeh/kafka/pkg/kslog"
+	"github.com/mkbeh/kafka/internal/pkg/kslog"
 )
 
 const (

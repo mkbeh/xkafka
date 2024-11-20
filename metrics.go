@@ -23,7 +23,7 @@ var (
 
 	consumerErrs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "ds",
-		Name:      "kafka_consume_errors",
+		Name:      "kafka_consume_errors_total",
 		Help:      "Number of messages failed to consume",
 	}, []string{groupLabel, topicLabel})
 )
