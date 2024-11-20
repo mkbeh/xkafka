@@ -99,11 +99,7 @@ func (p *Producer) RunInTx(ctx context.Context, record ...*kgo.Record) error {
 		return err
 	}
 
-	if err := p.conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
-		return err
-	}
-
-	return nil
+	return p.conn.EndTransaction(ctx, kgo.TryCommit)
 }
 
 func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
