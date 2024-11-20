@@ -43,7 +43,11 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 	}
 
 	p.fmt = formatter
-	p.logger = wrapLogger(p.logger, producerComponentValue)
+
+	if p.logger == nil {
+		p.logger = slog.Default()
+	}
+	p.logger.With(kslog.Component("kafka_producer"))
 
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),

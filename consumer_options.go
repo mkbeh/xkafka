@@ -406,7 +406,9 @@ func withRebalanceTimeout(timeout time.Duration) ConsumerOption {
 
 func withHeartbeatInterval(interval time.Duration) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
-		c.addClientOption(kgo.HeartbeatInterval(interval))
+		if interval > 0 {
+			c.addClientOption(kgo.HeartbeatInterval(interval))
+		}
 	})
 }
 

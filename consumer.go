@@ -68,7 +68,11 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	}
 
 	c.fmt = formatter
-	c.logger = wrapLogger(c.logger, consumerComponentValue)
+
+	if c.logger == nil {
+		c.logger = slog.Default()
+	}
+	c.logger.With(kslog.Component("kafka_consumer"))
 
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(c.meterOptions...)),
