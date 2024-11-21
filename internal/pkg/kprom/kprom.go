@@ -1,3 +1,37 @@
+// Package kprom provides prometheus plug-in metrics for a kgo client.
+//
+// This package tracks the following metrics under the following names,
+// all metrics being counter vecs:
+
+//	#ds_kafka_connects_total{node_id="#{node}"}
+//	#ds_kafka_connect_errors_total{node_id="#{node}"}
+//	#ds_kafka_disconnects_total{node_id="#{node}"}
+//	#ds_kafka_write_errors_total{node_id="#{node}"}
+//	#ds_kafka_write_bytes_total{node_id="#{node}"}
+//	#ds_kafka_write_wait_latencies{node_id="#{node}"}
+//	#ds_kafka_write_latencies{node_id="#{node}"}
+//	#ds_kafka_read_errors_total{node_id="#{node}"}
+//	#ds_kafka_read_bytes_total{node_id="#{node}"}
+//	#ds_kafka_read_wait_latencies{node_id="#{node}"}
+//	#ds_kafka_read_latencies{node_id="#{node}"}
+//	#ds_kafka_throttle_latencies{node_id="#{node}"}
+//	#ds_kafka_produce_bytes_uncompressed_total{node_id="#{node}",topic="#{topic}"}
+//	#ds_kafka_produce_bytes_compressed_total{node_id="#{node}",topic="#{topic}"}
+//	#ds_kafka_produce_records_total{node_id="#{node}",topic="#{topic}"}
+//	#ds_kafka_fetch_bytes_uncompressed_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
+//	#ds_kafka_fetch_bytes_compressed_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
+//	#ds_kafka_fetch_records_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
+//
+// The above metrics can be expanded considerably with options in this package,
+// allowing timings, uncompressed and compressed bytes, and different labels.
+//
+// This can be used in a client like so:
+//
+//	m := kprom.NewMetrics("my-client-id", "client-kind", "consumer-group")
+//	cl, err := kgo.NewClient(
+//	        kgo.WithHooks(m),
+//	        // ...other opts
+//	)
 package kprom
 
 import (
