@@ -1,0 +1,28 @@
+version: 3
+
+vars:
+  LINTER_VER: "v1.62"
+
+tasks:
+  run:
+    desc: "Full cycle"
+    deps:
+      - lint
+
+  lint:
+    desc: "lint"
+    cmds:
+      - docker run --rm
+        -u $(id -u):$(id -g)
+        -v {{.PWD}}:/app
+        -v {{.GOCACHE_ENV}}:/go/pkg/mod
+        -e GOCACHE=/go/pkg/mod
+        -e GOLANGCI_LINT_CACHE=/go/pkg/mod
+        -w /app
+        harbor.wildberries.ru/docker-hub-proxy/golangci/golangci-lint:{{.LINTER_VER}}
+        golangci-lint run --timeout 5m --fix --modules-download-mode vendor
+    vars:
+      GOCACHE_ENV:
+        sh: go env GOCACHE
+      PWD:
+        sh: pwd
