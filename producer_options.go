@@ -66,9 +66,9 @@ func WithProducerConfig(cfg *ProducerConfig) ProducerOption {
 func WithProducerClientID(v string) ProducerOption {
 	return producerOptionFunc(func(p *Producer) {
 		if v != "" {
-			p.addClientOptions(kgo.ClientID(v))
+			p.addClientOption(kgo.ClientID(v))
 			p.addTracerOption(kotel.ClientID(v))
-			p.id = v
+			p.id = fmt.Sprintf("%s-%s", v, GenerateUUID())
 		}
 	})
 }
@@ -122,6 +122,14 @@ func WithProducerBatchCompression(preference ...kgo.CompressionCodec) ProducerOp
 func WithProducerMeterProvider(provider metric.MeterProvider) ProducerOption {
 	return producerOptionFunc(func(p *Producer) {
 		p.addMeterOption(kotel.MeterProvider(provider))
+	})
+}
+
+func WithProducerMetricsNamespace(ns string) ProducerOption {
+	return producerOptionFunc(func(c *Producer) {
+		if ns != "" {
+			c.namespace = ns
+		}
 	})
 }
 

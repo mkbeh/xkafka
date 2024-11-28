@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+
 	"github.com/mkbeh/kafka/internal/pkg/kprom"
 	"github.com/mkbeh/kafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -21,6 +23,8 @@ type Producer struct {
 	clientOptions []kgo.Opt
 	meterOptions  []kotel.MeterOpt
 	tracerOptions []kotel.TracerOpt
+	namespace     string
+	labels        map[string]string
 }
 
 func NewProducer(opts ...ProducerOption) (*Producer, error) {
@@ -53,9 +57,11 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),
 	)
 
-	prom := kprom.NewMetrics(p.id, kprom.ProducerKind, "")
+	p.exposeMetrics()
 
-	p.addClientOptions(
+	prom := kprom.NewMetrics(p.namespace, "kafka", p.labels)
+
+	p.clientOptions = append(p.clientOptions,
 		kgo.WithLogger(kslog.NewKgoAdapter(p.logger)),
 		kgo.WithHooks(instrumenting.Hooks(), prom),
 	)
@@ -143,8 +149,11 @@ func (p *Producer) loggingPromise(record *kgo.Record, err error) {
 	}
 }
 
-func (p *Producer) addClientOptions(opts ...kgo.Opt) {
-	p.clientOptions = append(p.clientOptions, opts...)
+func (p *Producer) getClientID() string {
+	if p.id == "" {
+		return uuid.New().String()
+	}
+	return p.id
 }
 
 func (p *Producer) addClientOption(opt kgo.Opt) {
@@ -157,6 +166,15 @@ func (p *Producer) addMeterOption(opt kotel.MeterOpt) {
 
 func (p *Producer) addTracerOption(opt kotel.TracerOpt) {
 	p.tracerOptions = append(p.tracerOptions, opt)
+}
+
+func (p *Producer) exposeMetrics() {
+	if p.labels == nil {
+		p.labels = make(map[string]string)
+	}
+
+	p.labels["client_id"] = p.getClientID()
+	p.labels["client_kind"] = "producer"
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {

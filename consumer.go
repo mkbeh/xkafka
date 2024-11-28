@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mkbeh/kafka/internal/pkg/kprom"
 	"github.com/mkbeh/kafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kerr"
@@ -38,6 +39,8 @@ type Consumer struct {
 	tracerOptions []kotel.TracerOpt
 
 	pollTicker *time.Ticker
+	metrics    *kprom.Metrics
+	namespace  string
 	labels     map[string]string
 }
 
@@ -78,15 +81,14 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 		kotel.WithMeter(kotel.NewMeter(c.meterOptions...)),
 	)
 
-	prom := kprom.NewMetrics(c.id, kprom.ConsumerKind, c.labels[groupLabel])
+	c.exposeMetrics()
+	c.metrics = kprom.NewMetrics(c.namespace, "kafka", c.labels)
 
-	c.addClientOptions(
+	c.clientOptions = append(c.clientOptions,
 		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
-		kgo.WithHooks(instrumenting.Hooks(), prom),
+		kgo.WithHooks(instrumenting.Hooks(), c.metrics),
 		kgo.KeepRetryableFetchErrors(),
 	)
-
-	c.exposeMetrics()
 
 	return c, nil
 }
@@ -145,7 +147,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		for _, fetchErr := range fetches.Errors() {
 			c.logger.ErrorContext(ctx, "error fetching records", kslog.Error(fetchErr.Err))
-			consumerErrs.WithLabelValues(c.labels[groupLabel], fetchErr.Topic).Inc()
+			c.metrics.CollectHandleErrors(fetchErr.Topic)
 
 			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
 				return fetchErr.Err
@@ -167,7 +169,7 @@ func (c *Consumer) handleFetchesBatch(handler BatchHandlerFunc) fetchesHandler {
 
 		defer func(startTime time.Time) {
 			for _, r := range records {
-				consumerProcessTiming.WithLabelValues(c.labels[groupLabel], r.Topic).Observe(time.Since(startTime).Seconds())
+				c.metrics.CollectHandleProcessTiming(startTime, r.Topic)
 			}
 		}(time.Now())
 
@@ -178,7 +180,7 @@ func (c *Consumer) handleFetchesBatch(handler BatchHandlerFunc) fetchesHandler {
 				return
 			default:
 				if err := handler(ctx, records); err != nil {
-					consumerErrs.WithLabelValues(c.labels[groupLabel]).Inc()
+					c.metrics.CollectHandleErrors("")
 					c.logger.ErrorContext(ctx, "error handling records",
 						kslog.Error(err),
 						kslog.Records(c.formatRecords(records...)),
@@ -196,7 +198,7 @@ func (c *Consumer) handleFetchesBatch(handler BatchHandlerFunc) fetchesHandler {
 func (c *Consumer) handleFetchesEach(handler HandlerFunc) fetchesHandler {
 	handleUntilSuccessful := func(ctx context.Context, record *kgo.Record) {
 		defer func(startTime time.Time) {
-			consumerProcessTiming.WithLabelValues(c.labels[groupLabel], record.Topic).Observe(time.Since(startTime).Seconds())
+			c.metrics.CollectHandleProcessTiming(startTime, record.Topic)
 		}(time.Now())
 
 	infiniteLoop:
@@ -206,7 +208,7 @@ func (c *Consumer) handleFetchesEach(handler HandlerFunc) fetchesHandler {
 				return
 			default:
 				if err := handler(ctx, record); err != nil {
-					consumerErrs.WithLabelValues(c.labels[groupLabel], record.Topic).Inc()
+					c.metrics.CollectHandleErrors(record.Topic)
 					c.logger.ErrorContext(ctx, "error handling record",
 						kslog.Error(err),
 						kslog.Records(c.formatRecords(record)),
@@ -248,7 +250,7 @@ infiniteLoop:
 			return
 		default:
 			if err := c.conn.CommitUncommittedOffsets(ctx); err != nil {
-				consumerErrs.WithLabelValues(c.labels[groupLabel]).Inc()
+				c.metrics.CollectHandleErrors("")
 				c.logger.ErrorContext(ctx, "error committing offsets", kslog.Error(err))
 				time.Sleep(c.suspendCommittingTimeout)
 			} else {
@@ -271,7 +273,7 @@ infiniteLoop:
 			return
 		default:
 			if err := c.conn.CommitRecords(ctx, record); err != nil {
-				consumerErrs.WithLabelValues(c.labels[groupLabel], record.Topic).Inc()
+				c.metrics.CollectHandleErrors(record.Topic)
 				c.logger.ErrorContext(ctx, "error committing records", kslog.Error(err))
 				time.Sleep(c.suspendCommittingTimeout)
 			} else {
@@ -292,8 +294,11 @@ func (c *Consumer) formatRecords(records ...*kgo.Record) []byte {
 	return buff
 }
 
-func (c *Consumer) addClientOptions(opts ...kgo.Opt) {
-	c.clientOptions = append(c.clientOptions, opts...)
+func (c *Consumer) getClientID() string {
+	if c.id == "" {
+		return uuid.New().String()
+	}
+	return c.id
 }
 
 func (c *Consumer) addClientOption(opt kgo.Opt) {
@@ -319,4 +324,7 @@ func (c *Consumer) exposeMetrics() {
 	if c.labels == nil {
 		c.labels = make(map[string]string)
 	}
+
+	c.labels["client_id"] = c.getClientID()
+	c.labels["client_kind"] = "consumer"
 }
