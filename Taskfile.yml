@@ -19,7 +19,7 @@ tasks:
         -e GOCACHE=/go/pkg/mod
         -e GOLANGCI_LINT_CACHE=/go/pkg/mod
         -w /app
-        harbor.wildberries.ru/docker-hub-proxy/golangci/golangci-lint:{{.LINTER_VER}}
+        golangci/golangci-lint:{{.LINTER_VER}}
         golangci-lint run --timeout 5m --fix --modules-download-mode vendor
     vars:
       GOCACHE_ENV:
