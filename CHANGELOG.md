@@ -1,4 +1,4 @@
-# 0.1.1 (November 28, 2024)
+# 0.1.3 (November 28, 2024)
 
 * fix: prometheus metrics
 * chore: add example app
