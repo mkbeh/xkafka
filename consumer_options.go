@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -67,9 +68,9 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 func WithConsumerClientID(v string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if v != "" {
-			c.addClientOptions(kgo.ClientID(v))
+			c.addClientOption(kgo.ClientID(v))
 			c.addTracerOption(kotel.ClientID(v))
-			c.id = v
+			c.id = fmt.Sprintf("%s-%s", v, GenerateUUID())
 		}
 	})
 }
@@ -148,6 +149,14 @@ func WithFetchIsolationLevel(level kgo.IsolationLevel) ConsumerOption {
 func WithConsumerMeterProvider(provider metric.MeterProvider) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		c.addMeterOption(kotel.MeterProvider(provider))
+	})
+}
+
+func WithConsumerMetricsNamespace(ns string) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if ns != "" {
+			c.namespace = ns
+		}
 	})
 }
 
@@ -354,7 +363,7 @@ func withConsumeRegex(flag bool) ConsumerOption {
 func withConsumeTopics(topics ...string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if len(topics) > 0 {
-			c.addClientOptions(kgo.ConsumeRegex())
+			c.addClientOption(kgo.ConsumeRegex())
 			c.addClientOption(kgo.ConsumeTopics(topics...))
 		}
 	})
@@ -367,7 +376,7 @@ func withConsumerGroup(group string) ConsumerOption {
 
 			c.addClientOption(kgo.ConsumerGroup(group))
 			c.addClientOption(kgo.DisableAutoCommit())
-			c.setMetricLabel(groupLabel, group)
+			c.setMetricLabel("consumer_group", group)
 		}
 	})
 }
