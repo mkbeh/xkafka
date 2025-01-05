@@ -1,3 +1,7 @@
+# 0.1.4 (January 5, 2025)
+
+* chore: bump deps
+
 # 0.1.3 (November 28, 2024)
 
 * fix: prometheus metrics
