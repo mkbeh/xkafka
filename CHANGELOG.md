@@ -1,3 +1,7 @@
+# 0.1.5 (January 16, 2025)
+
+* chore: rename module to xkafka
+
 # 0.1.4 (January 5, 2025)
 
 * chore: bump deps
