@@ -21,7 +21,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/mkbeh/kafka"
+	"github.com/mkbeh/xkafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 

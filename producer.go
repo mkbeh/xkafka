@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mkbeh/kafka/internal/pkg/kprom"
-	"github.com/mkbeh/kafka/internal/pkg/kslog"
+	"github.com/mkbeh/xkafka/internal/pkg/kprom"
+	"github.com/mkbeh/xkafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
 	"go.opentelemetry.io/otel"

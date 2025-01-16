@@ -1,4 +1,4 @@
-module github.com/mkbeh/kafka
+module github.com/mkbeh/xkafka
 
 go 1.23
 
@@ -10,7 +10,7 @@ require (
 	go.opentelemetry.io/otel v1.33.0
 	go.opentelemetry.io/otel/metric v1.33.0
 	go.opentelemetry.io/otel/trace v1.33.0
-	google.golang.org/protobuf v1.36.1
+	google.golang.org/protobuf v1.36.3
 )
 
 require (
@@ -27,6 +27,6 @@ require (
 	github.com/twmb/franz-go/pkg/kmsg v1.9.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.32.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 )

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mkbeh/kafka"
+	"github.com/mkbeh/xkafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
