@@ -30,7 +30,7 @@ curl 'localhost:8080/sync' \
 }'
 ```
 
-## Produce Async
+## Produce async
 
 ```shell
 curl 'localhost:8080/async' \
