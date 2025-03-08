@@ -1,3 +1,8 @@
+# 0.1.6 (March 8, 2025)
+
+* build: bump go ver to 1.24
+* build: bump dependencies
+
 # 0.1.5 (January 16, 2025)
 
 * chore: rename module to xkafka
