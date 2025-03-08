@@ -1,0 +1,69 @@
+version: '3.9'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: sample-zookeeper
+    environment:
+      ZOO_MY_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 21810
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOO_ADMINSERVER_ENABLED: "false"
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    ports:
+      - "22181:21810"
+    networks:
+      - sample-network
+
+  panda:
+    image: docker.redpanda.com/redpandadata/console:v2.3.8
+    container_name: sample-panda
+    depends_on:
+      - kafka
+    ports:
+      - "18080:8080"
+    networks:
+      - sample-network
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TLS_ENABLED=false
+      - KAFKA_SASL_ENABLED=false
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: sample-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:21810
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_TOPIC: "test-topic"
+    networks:
+      - sample-network
+
+  init-kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      kafka-topics --bootstrap-server kafka:9092 --list
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic test-topic --replication-factor 1 --partitions 1
+      "
+    networks:
+      - sample-network
+
+
+networks:
+  sample-network:
+    driver: bridge
+
+volumes:
+  sample-pgdata:
