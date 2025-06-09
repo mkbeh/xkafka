@@ -8,13 +8,15 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mkbeh/xkafka"
+	kafka "github.com/mkbeh/xkafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-var producer *kafka.Producer
-var consumer *kafka.Consumer
+var (
+	producer *kafka.Producer
+	consumer *kafka.Consumer
+)
 
 var (
 	brokers string
@@ -111,7 +113,7 @@ func main() {
 	consumer, err = kafka.NewConsumer(
 		kafka.WithConsumerConfig(consumerCfg),
 		kafka.WithConsumerClientID("test-client"),
-		kafka.WithConsumerHandler(func(ctx context.Context, msg *kgo.Record) error {
+		kafka.WithConsumerHandler(func(_ context.Context, msg *kgo.Record) error {
 			var message Message
 			if err := kafka.JSONUnmarshal(msg.Value, &message); err != nil {
 				return err
