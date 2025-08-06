@@ -1,3 +1,6 @@
+# 0.1.8 (August 6, 2025)
+* build: bump dependencies
+
 # 0.1.7 (June 9, 2025)
 * build: bump dependencies
 
