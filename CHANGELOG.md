@@ -1,3 +1,6 @@
+# 0.1.9 (August 16, 2025)
+* build: bump go version to 1.25
+
 # 0.1.8 (August 6, 2025)
 * build: bump dependencies
 
