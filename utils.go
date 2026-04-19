@@ -15,5 +15,5 @@ func GenerateUUID() string {
 }
 
 func ConvertAnyToBytes[T NumberOrString](v T) []byte {
-	return []byte(fmt.Sprintf("%v", v))
+	return []byte(fmt.Sprint(v))
 }
