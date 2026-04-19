@@ -1,146 +1,207 @@
-# Kafka Library
+# xkafka
 
-This library provides an API for working with Kafka, using franz-go
-and integration with OpenTelemetry for tracing and metrics.
-The library implements messages producing and consuming.
+![Go Version](https://img.shields.io/badge/go-1.21+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+A Kafka client library built on top of [franz-go](https://github.com/twmb/franz-go) with built-in OpenTelemetry tracing, Prometheus metrics, and a clean API for producing and consuming messages.
 
 ## Features
 
-- Support for asynchronous and synchronous message sending
-- Transactions
-- Customizable message handlers for consumers
-- Observability
+- **Producer**: async, sync, and transactional message sending
+- **Consumer**: per-record and batch message handlers with automatic offset management
+- **Observability**: OpenTelemetry tracing + Prometheus metrics out of the box
+- **SASL**: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+- **TLS** support
+- Configuration via struct or environment variables
 
-## Getting started
+## Installation
 
-Here's a basic overview of producing and consuming:
+```bash
+go get github.com/mkbeh/xkafka
+```
+
+## Quick Start
+
+### Producer
 
 ```go
 package main
 
 import (
-	"context"
-	"fmt"
-	"github.com/mkbeh/xkafka"
-	"github.com/twmb/franz-go/pkg/kgo"
+    "context"
+    "log"
+
+    "github.com/mkbeh/xkafka"
+    "github.com/twmb/franz-go/pkg/kgo"
 )
 
 func main() {
-	// One client can only produce!
-	producer, err := kafka.NewProducer()
-	if err != nil {
-		panic(err)
-	}
-	defer producer.Close()
+    producer, err := kafka.NewProducer(
+        kafka.WithProducerConfig(&kafka.ProducerConfig{
+            Brokers: "localhost:9092",
+        }),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer producer.Close(context.Background())
 
-	ctx := context.Background()
+    ctx := context.Background()
+    record := &kgo.Record{Topic: "my-topic", Value: []byte("hello")}
 
-	// Producing a message
-	record := &kgo.Record{Topic: "foo", Value: []byte("bar")}
-	producer.ProduceAsync(ctx, record)
+    // Async (fire-and-forget with logging on error)
+    producer.ProduceAsync(ctx, record)
 
-	// Alternatively, ProduceSync exists to synchronously produce a batch of records.
-	err = producer.ProduceSync(ctx, record)
-	if err != nil {
-		panic(err)
-	}
-
-	// Consuming messages from a topic
-	consumer, err := kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{Topics: "foo"}),
-		kafka.WithConsumerHandler(func(ctx context.Context, msg *kgo.Record) error {
-			fmt.Printf("received msg: %+v\n", msg)
-			return nil
-		}),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	err = consumer.PreRun(ctx)
-	if err != nil {
-		panic(err)
-	}
-
-	err = consumer.Run(ctx)
-	if err != nil {
-		panic(err)
-	}
-
-	consumer.Shutdown(ctx)
+    // Sync (blocks until broker confirms)
+    if err := producer.ProduceSync(ctx, record); err != nil {
+        log.Fatal(err)
+    }
 }
-
 ```
 
-## Options
+### Consumer
 
-Available producer and consumer configuration.
+```go
+package main
 
-### Producer configuration
+import (
+    "context"
+    "fmt"
+    "log"
 
-Producer env variables:
+    "github.com/mkbeh/xkafka"
+    "github.com/twmb/franz-go/pkg/kgo"
+)
 
-| ENV                            | DEFAULT | DESCRIPTION                                                                                                                                                                                                   |
-|--------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| KAFKA_BROKERS                  | -       | **Brokers** sets the seed brokers for the client to use, overriding the, default 127.0.0.1:9092                                                                                                               |
-| KAFKA_SASL_MECHANISM           | -       | **SaslMechanism** SASL mechanism to use for authentication. Supported: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512. NOTE: Despite the name only one mechanism must be configured.                                     |
-| KAFKA_USER                     | -       | **User** sasl username for use with the PLAIN and SASL-SCRAM-.. mechanisms.                                                                                                                                   |
-| KAFKA_PASSWORD                 | -       | **Password** sasl password for use with the PLAIN and SASL-SCRAM-.. mechanism.                                                                                                                                |
-| KAFKA_REQUEST_TIMEOUT_OVERHEAD | -       | **RequestTimeoutOverhead** uses the given time as overhead while deadlining requests.                                                                                                                         |
-| KAFKA_CONN_IDLE_TIMEOUT        | -       | **ConnIdleTimeout** is a rough amount of time to allow connections to idle before they are closed.                                                                                                            |
-| KAFKA_DIAL_TIMEOUT             | -       | **DialTimeout** sets the dial timeout.                                                                                                                                                                        |
-| KAFKA_REQUEST_RETRIES          | -       | **RequestRetries** sets the number of tries that retryable requests are allowed.                                                                                                                              |
-| KAFKA_RETRY_TIMEOUT            | -       | **RetryTimeout** sets the upper limit on how long we allow a request to be issued and then reissued on failure. That is, this control the total end-to-end maximum time we allow for trying a request.        |
-| KAFKA_MAX_WRITE_BYTES          | -       | **BrokerMaxWriteBytes** upper bounds the number of bytes written to a broker connection in a single write.                                                                                                    |
-| KAFKA_MAX_READ_BYTES           | -       | **BrokerMaxReadBytes** sets the maximum response size that can be read from Kafka.                                                                                                                            |
-| KAFKA_METADATA_MAX_AGE         | -       | **MetadataMaxAge** sets the maximum age for the client's cached metadata.                                                                                                                                     |
-| KAFKA_METADATA_MIN_AGE         | -       | **MetadataMinAge** sets the minimum time between metadata queries.                                                                                                                                            |
-| KAFKA_DEFAULT_PRODUCE_TOPIC    | -       | **DefaultProduceTopic** sets the default topic to produce to if the topic field is empty in a Record.                                                                                                         |
-| KAFKA_PRODUCER_BATCH_MAX_BYTES | -       | **ProducerBatchMaxBytes** upper bounds the size of a record batch.                                                                                                                                            |
-| KAFKA_MAX_BUFFERED_RECORDS     | -       | **MaxBufferedRecords** sets the max amount of records the client will buffer, blocking produces until records are finished if this limit is reached.                                                          |
-| KAFKA_MAX_BUFFERED_BYTES       | -       | **MaxBufferedBytes** sets the max amount of bytes that the client will buffer while producing, blocking produces until records are finished if this limit is reached.                                         |
-| KAFKA_PRODUCE_REQUEST_TIMEOUT  | -       | **ProduceRequestTimeout** sets how long Kafka broker's are allowed to respond to produce requests, overriding the default 10s. If a broker exceeds this duration, it will reply with a request timeout error. |
-| KAFKA_RECORD_RETRIES           | -       | **RecordRetries** sets the number of tries for producing records.                                                                                                                                             |
-| KAFKA_PRODUCER_LINGER          | -       | **ProducerLinger** sets how long individual topic partitions will linger waiting for more records before triggering a request to be built.                                                                    |
-| KAFKA_RECORD_DELIVERY_TIMEOUT  | -       | **RecordDeliveryTimeout** sets a rough time of how long a record can sit around in a batch before timing out.                                                                                                 |
-| KAFKA_TRANSACTIONAL_ID         | -       | **TransactionalID** sets a transactional ID for the client, ensuring that records are produced transactionally under this ID (exactly once semantics).                                                        |
-| KAFKA_TRANSACTION_TIMEOUT      | -       | **TransactionTimeout** sets the allowed for a transaction.                                                                                                                                                    |
+func main() {
+    consumer, err := kafka.NewConsumer(
+        kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+            Enabled: true,
+            Brokers: "localhost:9092",
+            Topics:  "my-topic",
+            Group:   "my-group",
+        }),
+        kafka.WithConsumerHandler(func(ctx context.Context, record *kgo.Record) error {
+            fmt.Printf("key=%s value=%s\n", record.Key, record.Value)
+            return nil
+        }),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
 
-### Consumer configuration
+    ctx := context.Background()
 
-Consumer env variables:
+    if err := consumer.PreRun(ctx); err != nil {
+        log.Fatal(err)
+    }
+    defer consumer.Shutdown(ctx)
 
-| ENV                              | DEFAULT | DESCRIPTION                                                                                                                                                                                                                                   |
-|----------------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| KAFKA_BROKERS                    | -       | **Brokers** sets the seed brokers for the client to use, overriding the, default 127.0.0.1:9092                                                                                                                                               |
-| KAFKA_SASL_MECHANISM             | -       | **SaslMechanism** SASL mechanism to use for authentication. Supported: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512. NOTE: Despite the name only one mechanism must be configured.                                                                     |
-| KAFKA_USER                       | -       | **User** sasl username for use with the PLAIN and SASL-SCRAM-.. mechanisms.                                                                                                                                                                   |
-| KAFKA_PASSWORD                   | -       | **Password** sasl password for use with the PLAIN and SASL-SCRAM-.. mechanism.                                                                                                                                                                |
-| KAFKA_ENABLED                    | false   | **Enabled** custom option: detecting enabling.                                                                                                                                                                                                |
-| KAFKA_SKIP_FATAL_ERRORS          | true    | **SkipFatalErrors** custom option: skip fatal errors while fetching records, otherwise leave the process.                                                                                                                                     |
-| KAFKA_CONSUME_REGEX              | false   | **ConsumeRegex** sets the client to parse all topics passed to Topics as regular expressions.                                                                                                                                                 |
-| KAFKA_TOPICS                     | -       | **Topics** adds topics to use for consuming.                                                                                                                                                                                                  |
-| KAFKA_GROUP                      | -       | **Group** sets the consumer group for the client to join and consume in. This option is required if using any other group options.                                                                                                            |
-| KAFKA_MAX_POLL_RECORDS           | 100     | **MaxPollRecords** maximum of maxPollRecords total across all fetches.                                                                                                                                                                        |
-| KAFKA_INSTANCE_ID                | -       | **InstanceID** sets the group consumer's instance ID, switching the group member from "dynamic" to "static".                                                                                                                                  |
-| KAFKA_POLL_INTERVAL              | 300ms   | **PollInterval** interval between handle batches.                                                                                                                                                                                             |
-| KAFKA_SUSPEND_PROCESSING_TIMEOUT | 30s     | **SuspendProcessingTimeout** waiting timeout after batch processing failed (custom property).                                                                                                                                                 |
-| KAFKA_SUSPEND_COMMITTING_TIMEOUT | 10s     | **SuspendCommitingTimeout** waiting timeout after committing failed (custom property).                                                                                                                                                        |
-| KAFKA_FETCH_MAX_WAIT             | -       | **FetchMaxWait** sets the maximum amount of time a broker will wait for a fetch response to hit the minimum number of required bytes before returning.                                                                                        |
-| KAFKA_FETCH_MAX_BYTES            | -       | **FetchMaxBytes** sets the maximum amount of bytes a broker will try to send during a fetch.                                                                                                                                                  |
-| KAFKA_FETCH_MIN_BYTES            | -       | **FetchMinBytes** sets the minimum amount of bytes a broker will try to send during a fetch.                                                                                                                                                  |
-| KAFKA_FETCH_MAX_PARTITION_BYTES  | -       | **FetchMaxPartitionBytes** sets the maximum amount of bytes that will be consumed for a single partition in a fetch request.                                                                                                                  |
-| KAFKA_DISABLE_FETCH_SESSIONS     | -       | **DisableFetchSessions** sets the client to not use fetch sessions (Kafka 1.0+).                                                                                                                                                              |
-| KAFKA_SESSION_TIMEOUT            | -       | **SessionTimeout** sets how long a member in the group can go between heartbeats, overriding the default 45,000ms. If a member does not heartbeat in this timeout, the broker will remove the member from the group and initiate a rebalance. |
-| KAFKA_REBALANCE_TIMEOUT          | -       | **RebalanceTimeout** sets how long group members are allowed to take when a rebalance has begun.                                                                                                                                              |
-| KAFKA_HEARTBEAT_INTERVAL         | -       | **HeartbeatInterval** sets how long a group member goes between heartbeats to Kafka.                                                                                                                                                          |
-| KAFKA_REQUIRE_STABLE_FETCH_OFFS  | -       | **RequireStableFetchOffsets** sets the group consumer to require "stable" fetch offsets before consuming from the group.                                                                                                                      |
-| KAFKA_REQUEST_TIMEOUT_OVERHEAD   | -       | **RequestTimeoutOverhead** uses the given time as overhead while deadlining requests.                                                                                                                                                         |
-| KAFKA_CONN_IDLE_TIMEOUT          | -       | **ConnIdleTimeout** is a rough amount of time to allow connections to idle before they are closed.                                                                                                                                            |
-| KAFKA_DIAL_TIMEOUT               | -       | **DialTimeout** sets the dial timeout.                                                                                                                                                                                                        |
-| KAFKA_REQUEST_RETRIES            | -       | **RequestRetries** sets the number of tries that retryable requests are allowed.                                                                                                                                                              |
-| KAFKA_RETRY_TIMEOUT              | -       | **RetryTimeout** sets the upper limit on how long we allow a request to be issued and then reissued on failure. That is, this control the total end-to-end maximum time we allow for trying a request.                                        |
-| KAFKA_MAX_WRITE_BYTES            | -       | **BrokerMaxWriteBytes** upper bounds the number of bytes written to a broker connection in a single write.                                                                                                                                    |
-| KAFKA_MAX_READ_BYTES             | -       | **BrokerMaxReadBytes** sets the maximum response size that can be read from Kafka.                                                                                                                                                            |
-| KAFKA_METADATA_MAX_AGE           | -       | **MetadataMaxAge** sets the maximum age for the client's cached metadata.                                                                                                                                                                     |
-| KAFKA_METADATA_MIN_AGE           | -       | **MetadataMinAge** sets the minimum time between metadata queries.                                                                                                                                                                            |
+    if err := consumer.Run(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+> **Note:** If the handler returns an error, the consumer will retry the record after `KAFKA_SUSPEND_PROCESSING_TIMEOUT` (default 30s). Offsets are committed only after successful processing.
+
+## Serialization
+
+The library provides ready-to-use marshal/unmarshal helpers:
+
+```go
+// JSON
+data, err := kafka.JSONMarshal(myStruct)
+err = kafka.JSONUnmarshal(data, &myStruct)
+
+// Protobuf
+data, err := kafka.ProtoMarshal(myProtoMessage)
+err = kafka.ProtoUnmarshal(data, &myProtoMessage)
+```
+
+## Observability
+
+Metrics and tracing are enabled automatically using the global OpenTelemetry providers. To use custom providers:
+
+```go
+kafka.NewProducer(
+    kafka.WithProducerTracerProvider(myTracerProvider),
+    kafka.WithProducerMeterProvider(myMeterProvider),
+    kafka.WithProducerMetricsNamespace("myapp"),
+)
+```
+
+The following labels are attached to all metrics automatically: `client_id`, `client_kind` (`producer` / `consumer`), and `consumer_group` (for consumers).
+
+## Configuration
+
+Both `ProducerConfig` and `ConsumerConfig` can be populated from environment variables using [envconfig](https://github.com/kelseyhightower/envconfig) or set directly as struct fields.
+
+### Producer
+
+| ENV | DEFAULT | DESCRIPTION |
+|-----|---------|-------------|
+| `KAFKA_BROKERS` | — | Seed brokers (comma-separated), e.g. `host1:9092,host2:9092` |
+| `KAFKA_SASL_MECHANISM` | — | `PLAIN`, `SCRAM-SHA-256`, or `SCRAM-SHA-512` |
+| `KAFKA_USER` | — | SASL username |
+| `KAFKA_PASSWORD` | — | SASL password |
+| `KAFKA_DEFAULT_PRODUCE_TOPIC` | — | Default topic if record has no topic set |
+| `KAFKA_PRODUCER_BATCH_MAX_BYTES` | — | Max size of a record batch |
+| `KAFKA_MAX_BUFFERED_RECORDS` | — | Max records buffered before blocking |
+| `KAFKA_MAX_BUFFERED_BYTES` | — | Max bytes buffered before blocking |
+| `KAFKA_PRODUCE_REQUEST_TIMEOUT` | 10s | Max time broker has to respond to a produce request |
+| `KAFKA_RECORD_RETRIES` | — | Number of retries for producing a record |
+| `KAFKA_PRODUCER_LINGER` | — | Time to wait for more records before sending a batch |
+| `KAFKA_RECORD_DELIVERY_TIMEOUT` | — | Max time a record can sit in a batch before timeout |
+| `KAFKA_TRANSACTIONAL_ID` | — | Enables exactly-once semantics via transactions |
+| `KAFKA_TRANSACTION_TIMEOUT` | — | Max duration allowed for a transaction |
+| `KAFKA_REQUEST_RETRIES` | — | Number of retries for retryable requests |
+| `KAFKA_RETRY_TIMEOUT` | — | Total time limit for request retries |
+| `KAFKA_REQUEST_TIMEOUT_OVERHEAD` | — | Extra time added to request deadlines |
+| `KAFKA_CONN_IDLE_TIMEOUT` | — | Idle connection timeout |
+| `KAFKA_DIAL_TIMEOUT` | — | Dial timeout |
+| `KAFKA_MAX_WRITE_BYTES` | — | Max bytes per broker write |
+| `KAFKA_MAX_READ_BYTES` | — | Max bytes per broker response |
+| `KAFKA_METADATA_MAX_AGE` | — | Max age of cached metadata |
+| `KAFKA_METADATA_MIN_AGE` | — | Min time between metadata refreshes |
+
+### Consumer
+
+| ENV | DEFAULT | DESCRIPTION |
+|-----|---------|-------------|
+| `KAFKA_BROKERS` | — | Seed brokers (comma-separated) |
+| `KAFKA_SASL_MECHANISM` | — | `PLAIN`, `SCRAM-SHA-256`, or `SCRAM-SHA-512` |
+| `KAFKA_USER` | — | SASL username |
+| `KAFKA_PASSWORD` | — | SASL password |
+| `KAFKA_ENABLED` | `false` | Enable the consumer; `PreRun`/`Run` are no-ops if `false` |
+| `KAFKA_TOPICS` | — | Topics to consume (comma-separated) |
+| `KAFKA_GROUP` | — | Consumer group ID |
+| `KAFKA_MAX_POLL_RECORDS` | `100` | Max records fetched per poll |
+| `KAFKA_POLL_INTERVAL` | `300ms` | Interval between polls |
+| `KAFKA_SKIP_FATAL_ERRORS` | `true` | Continue on non-retriable fetch errors |
+| `KAFKA_SUSPEND_PROCESSING_TIMEOUT` | `30s` | Backoff after a handler error before retrying |
+| `KAFKA_SUSPEND_COMMITTING_TIMEOUT` | `10s` | Backoff after a failed offset commit |
+| `KAFKA_INSTANCE_ID` | — | Static member ID (disables dynamic rebalancing) |
+| `KAFKA_CONSUME_REGEX` | `false` | Treat topic names as regular expressions |
+| `KAFKA_DISABLE_FETCH_SESSIONS` | `false` | Disable Kafka fetch sessions (Kafka 1.0+) |
+| `KAFKA_SESSION_TIMEOUT` | 45s | Max time between heartbeats before rebalance |
+| `KAFKA_REBALANCE_TIMEOUT` | — | Max time for group members to rejoin after rebalance |
+| `KAFKA_HEARTBEAT_INTERVAL` | — | Interval between heartbeats |
+| `KAFKA_REQUIRE_STABLE_FETCH_OFFS` | `false` | Require stable offsets before consuming |
+| `KAFKA_FETCH_MAX_WAIT` | — | Max time broker waits before returning a fetch response |
+| `KAFKA_FETCH_MAX_BYTES` | — | Max bytes per fetch response |
+| `KAFKA_FETCH_MIN_BYTES` | — | Min bytes broker waits to accumulate before responding |
+| `KAFKA_FETCH_MAX_PARTITION_BYTES` | — | Max bytes per partition in a fetch |
+| `KAFKA_REQUEST_RETRIES` | — | Number of retries for retryable requests |
+| `KAFKA_RETRY_TIMEOUT` | — | Total time limit for request retries |
+| `KAFKA_REQUEST_TIMEOUT_OVERHEAD` | — | Extra time added to request deadlines |
+| `KAFKA_CONN_IDLE_TIMEOUT` | — | Idle connection timeout |
+| `KAFKA_DIAL_TIMEOUT` | — | Dial timeout |
+| `KAFKA_MAX_WRITE_BYTES` | — | Max bytes per broker write |
+| `KAFKA_MAX_READ_BYTES` | — | Max bytes per broker response |
+| `KAFKA_METADATA_MAX_AGE` | — | Max age of cached metadata |
+| `KAFKA_METADATA_MIN_AGE` | — | Min time between metadata refreshes |
+
+## License
+
+[MIT](LICENSE)

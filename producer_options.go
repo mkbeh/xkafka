@@ -179,7 +179,7 @@ type ProducerConfig struct {
 	RetryTimeout time.Duration `envconfig:"KAFKA_RETRY_TIMEOUT"`
 	// BrokerMaxWriteBytes upper bounds the number of bytes written to a broker
 	// connection in a single write.
-	BrokerMaxWriteBytes *int32 `envconfig:"KAFKA_KAFKA_MAX_WRITE_BYTES"`
+	BrokerMaxWriteBytes *int32 `envconfig:"KAFKA_MAX_WRITE_BYTES"`
 	// BrokerMaxReadBytes sets the maximum response size that can be read from
 	// Kafka.
 	BrokerMaxReadBytes *int32 `envconfig:"KAFKA_MAX_READ_BYTES"`

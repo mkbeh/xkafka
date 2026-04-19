@@ -292,7 +292,7 @@ func withEnabledFlag(v bool) ConsumerOption {
 func withConsumerSkipFatalErrorsFlag(v bool) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if v {
-			c.skipFatalErrors = true
+			c.skipFatalErrors = v
 		}
 	})
 }
