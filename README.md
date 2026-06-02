@@ -1,6 +1,6 @@
 # xkafka
 
-![Go Version](https://img.shields.io/badge/go-1.21+-blue)
+![Go Version](https://img.shields.io/badge/go-1.26+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A Kafka client library built on top of [franz-go](https://github.com/twmb/franz-go) with built-in OpenTelemetry tracing, Prometheus metrics, and a clean API for producing and consuming messages.
