@@ -149,9 +149,6 @@ consumer, err := kafka.NewConsumer(
 > **Note:** Offsets are committed only after successful handler execution.
 > If the handler returns an error, processing is retried after `KAFKA_SUSPEND_PROCESSING_TIMEOUT` (`30s` by default).
 
-These examples show the basic sending and receiving flow. For production use, configure retries, commits, observability,
-security, and shutdown behavior for your workload.
-
 ## Transactions
 
 To enable transactional producing, configure `TransactionalID` and use `RunInTx`.
