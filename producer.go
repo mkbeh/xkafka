@@ -99,17 +99,28 @@ func (p *Producer) ProduceSync(ctx context.Context, records ...*kgo.Record) erro
 	return p.produce(ctx, records...)
 }
 
-func (p *Producer) RunInTx(ctx context.Context, record ...*kgo.Record) error {
+func (p *Producer) RunInTx(ctx context.Context, fn TxFunc) error {
+	if fn == nil {
+		return fmt.Errorf("kafka: transaction function is nil")
+	}
+
 	if err := p.conn.BeginTransaction(); err != nil {
+		return fmt.Errorf("kafka: begin transaction: %w", err)
+	}
+
+	if err := fn(ctx); err != nil {
+		if rbErr := p.rollback(context.Background()); rbErr != nil {
+			return fmt.Errorf("kafka: transaction failed: %w; rollback failed: %v", err, rbErr)
+		}
+
 		return err
 	}
 
-	if err := p.produce(ctx, record...); err != nil {
-		p.rollback(ctx)
-		return err
+	if err := p.conn.EndTransaction(context.Background(), kgo.TryCommit); err != nil {
+		return fmt.Errorf("kafka: commit transaction: %w", err)
 	}
 
-	return p.conn.EndTransaction(ctx, kgo.TryCommit)
+	return nil
 }
 
 func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
@@ -123,15 +134,18 @@ func (p *Producer) produce(ctx context.Context, records ...*kgo.Record) error {
 	return results.FirstErr()
 }
 
-func (p *Producer) rollback(ctx context.Context) {
-	if err := p.conn.AbortBufferedRecords(ctx); err != nil { // this only happens if ctx is canceled
+func (p *Producer) rollback(ctx context.Context) error {
+	if err := p.conn.AbortBufferedRecords(ctx); err != nil {
 		p.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
-		return
+		return fmt.Errorf("abort buffered records: %w", err)
 	}
+
 	if err := p.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
 		p.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
-		return
+		return fmt.Errorf("abort transaction: %w", err)
 	}
+
+	return nil
 }
 
 func (p *Producer) loggingPromise(record *kgo.Record, err error) {

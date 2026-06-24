@@ -1,4 +1,5 @@
 version: '3.9'
+
 services:
   kafka:
     image: confluentinc/cp-kafka:latest
@@ -9,50 +10,84 @@ services:
       - "9093:9093"
     environment:
       # KRaft mode
-      KAFKA_PROCESS_ROLES: broker,controller
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_NODE_ID: 1
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
 
       # Listeners
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # Single-broker internal topics
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      # Transactions for single-broker dev environment
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 1
 
       # Settings
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_TOPIC: "test-topic"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
     networks:
       - sample-network
 
   panda:
-    image: docker.redpanda.com/redpandadata/console:v2.3.8
+    image: docker.redpanda.com/redpandadata/console:latest
     container_name: sample-panda
     depends_on:
       - kafka
     ports:
       - "18080:8080"
+    environment:
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_TLS_ENABLED: "false"
+      KAFKA_SASL_ENABLED: "false"
     networks:
       - sample-network
-    environment:
-      - KAFKA_BROKERS=kafka:9092
-      - KAFKA_TLS_ENABLED=false
-      - KAFKA_SASL_ENABLED=false
 
   init-kafka:
     image: confluentinc/cp-kafka:latest
+    container_name: sample-kafka-init
     depends_on:
       - kafka
-    entrypoint: [ '/bin/sh', '-c' ]
-    command: |
-      "
-      # Ждем запуска Kafka
-      sleep 45
-      echo 'Creating topics...'
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic test-topic --replication-factor 1 --partitions 1
-      kafka-topics --bootstrap-server kafka:9092 --list
-      "
+    entrypoint:
+      - /bin/bash
+      - -lc
+      - |
+        echo "init-kafka started"
+
+        echo "Waiting for Kafka..."
+        until kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do
+          echo "Kafka is not ready yet..."
+          sleep 2
+        done
+
+        echo "Creating topic: test-topic"
+
+        kafka-topics \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic test-topic \
+          --replication-factor 1 \
+          --partitions 3
+
+        echo "Topics after creation:"
+        kafka-topics --bootstrap-server kafka:9092 --list
+
+        echo "Topic description:"
+        kafka-topics \
+          --bootstrap-server kafka:9092 \
+          --describe \
+          --topic test-topic
+
+        echo "init-kafka finished"
     networks:
       - sample-network
 
