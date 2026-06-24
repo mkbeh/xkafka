@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	producer *kafka.Producer
-	consumer *kafka.Consumer
+	producer   *kafka.Producer
+	txProducer *kafka.Producer
+	consumer   *kafka.Consumer
 )
 
 var (
@@ -43,7 +44,7 @@ func produceSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := kafka.JSONMarshal(&msg)
+	payload, err := json.Marshal(&msg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -68,7 +69,7 @@ func produceAsyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := kafka.JSONMarshal(msg)
+	payload, err := json.Marshal(msg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -80,12 +81,44 @@ func produceAsyncHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func produceTxHandler(w http.ResponseWriter, r *http.Request) {
+	var msg Message
+
+	err := json.NewDecoder(r.Body).Decode(&msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = txProducer.RunInTx(r.Context(), func(ctx context.Context) error {
+		payload, err := json.Marshal(&msg)
+		if err != nil {
+			return err
+		}
+
+		if err := txProducer.ProduceSync(ctx, &kgo.Record{
+			Key:   kafka.ConvertAnyToBytes(msg.ID),
+			Value: payload,
+		}); err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func main() {
 	var err error
 
 	ctx := context.Background()
 
-	// init producer
+	// init regular producer
 
 	producerCfg := &kafka.ProducerConfig{
 		Brokers:             brokers,
@@ -101,6 +134,23 @@ func main() {
 	}
 	defer producer.Close(ctx)
 
+	// init transactional producer
+
+	txProducerCfg := &kafka.ProducerConfig{
+		Brokers:             brokers,
+		DefaultProduceTopic: topics,
+		TransactionalID:     "sample-tx-producer",
+	}
+
+	txProducer, err = kafka.NewProducer(
+		kafka.WithProducerConfig(txProducerCfg),
+		kafka.WithProducerClientID("test-tx-client"),
+	)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer txProducer.Close(ctx)
+
 	// init consumer
 
 	consumerCfg := &kafka.ConsumerConfig{
@@ -113,9 +163,10 @@ func main() {
 	consumer, err = kafka.NewConsumer(
 		kafka.WithConsumerConfig(consumerCfg),
 		kafka.WithConsumerClientID("test-client"),
+		kafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
 		kafka.WithConsumerHandler(func(_ context.Context, msg *kgo.Record) error {
 			var message Message
-			if err := kafka.JSONUnmarshal(msg.Value, &message); err != nil {
+			if err := json.Unmarshal(msg.Value, &message); err != nil {
 				return err
 			}
 			fmt.Printf("\nconsume: topic=%s, msg=%+v", msg.Topic, message)
@@ -140,6 +191,7 @@ func main() {
 
 	http.HandleFunc("/sync", produceSyncHandler)
 	http.HandleFunc("/async", produceAsyncHandler)
+	http.HandleFunc("/tx", produceTxHandler)
 	http.Handle("/metrics", promhttp.Handler())
 
 	err = http.ListenAndServe("localhost:8080", nil)

@@ -363,7 +363,6 @@ func withConsumeRegex(flag bool) ConsumerOption {
 func withConsumeTopics(topics ...string) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if len(topics) > 0 {
-			c.addClientOption(kgo.ConsumeRegex())
 			c.addClientOption(kgo.ConsumeTopics(topics...))
 		}
 	})

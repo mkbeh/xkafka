@@ -153,10 +153,14 @@ consumer, err := kafka.NewConsumer(
 
 To enable transactional producing, configure `TransactionalID` and use `RunInTx`.
 
+A producer configured with `TransactionalID` should produce records inside `RunInTx`.
+For regular sync and async producing, use a producer without `TransactionalID`.
+For transactional producing, use a dedicated producer instance with `TransactionalID`.
+
 <!-- @formatter:off -->
 
 ```go
-producer, err := kafka.NewProducer(
+txProducer, err := kafka.NewProducer(
     kafka.WithProducerConfig(&kafka.ProducerConfig{
         Brokers:         "localhost:9092",
         TransactionalID: "orders-tx-producer",
@@ -165,29 +169,61 @@ producer, err := kafka.NewProducer(
 if err != nil {
     log.Fatal(err)
 }
+defer txProducer.Close(context.Background())
 
-records := []*kgo.Record{
-    {
+ctx := context.Background()
+
+if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
+    if err := txProducer.ProduceSync(ctx, &kgo.Record{
         Topic: "orders.created",
         Key:   []byte("order-1"),
         Value: []byte("created"),
-    },
-    {
+    }); err != nil {
+        return err
+    }
+
+    if err := txProducer.ProduceSync(ctx, &kgo.Record{
         Topic: "audit.events",
         Key:   []byte("order-1"),
         Value: []byte("order created"),
-    },
-}
+    }); err != nil {
+        return err
+    }
 
-if err := producer.RunInTx(context.Background(), records...); err != nil {
+    return nil
+}); err != nil {
     log.Fatal(err)
 }
-```
+````
+
+<!-- @formatter:on -->
+
+`RunInTx` opens a Kafka transaction, runs the provided function, and commits the transaction if the function returns
+`nil`.
+
+If the function returns an error, the transaction is aborted.
+
+Use `ProduceSync` inside `RunInTx`. `ProduceAsync` is not recommended inside a transaction because the function may
+return before the asynchronous produce result is known.
+
+Consumers that should ignore aborted transactional records must use `read_committed` isolation level:
 
 <!-- @formatter:off -->
 
-`RunInTx` sends all records in a single Kafka transaction. If producing fails, the transaction is aborted and the records are not committed.
+```go
+consumer, err := kafka.NewConsumer(
+    kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+        Enabled: true,
+        Brokers: "localhost:9092",
+        Topics:  "orders.created",
+        Group:   "orders-worker-group",
+    }),
+    kafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
+    kafka.WithConsumerHandler(handler),
+)
+```
 
+<!-- @formatter:on -->
 
 ## Observability
 
