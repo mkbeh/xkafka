@@ -172,6 +172,21 @@ In franz-go logs, the transaction should end with:
 commit=false
 ```
 
+## Produce transactionally
+
+Runs message production inside a Kafka transaction.
+
+```shell
+curl -X POST 'localhost:8080/tx' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": 100
+  }'
+```
+
+The sample uses a dedicated transactional producer configured with `TransactionalID`.
+The consumer is configured with `read_committed` isolation level, so aborted transactional messages are not processed.
+
 ## Metrics
 
 Prometheus metrics are available at:
