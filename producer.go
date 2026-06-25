@@ -26,7 +26,7 @@ type Producer struct {
 	clientOptions []kgo.Opt
 	meterOptions  []kotel.MeterOpt
 	tracerOptions []kotel.TracerOpt
-	metrics       *kprom.Metrics
+	metrics       *kprom.ProducerMetrics
 	namespace     string
 	labels        map[string]string
 }
@@ -63,11 +63,12 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 
 	p.exposeMetrics()
 
-	p.metrics = kprom.NewMetrics(p.namespace, "kafka", p.labels)
+	metrics := kprom.NewMetrics(p.namespace, "kafka", p.labels)
+	p.metrics = metrics.Producer()
 
 	p.clientOptions = append(p.clientOptions,
 		kgo.WithLogger(kslog.NewKgoAdapter(p.logger)),
-		kgo.WithHooks(instrumenting.Hooks(), p.metrics),
+		kgo.WithHooks(instrumenting.Hooks(), metrics.Hooks()),
 	)
 
 	p.conn, err = kgo.NewClient(p.clientOptions...)

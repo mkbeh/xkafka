@@ -39,7 +39,7 @@ type Consumer struct {
 	tracerOptions []kotel.TracerOpt
 
 	pollTicker *time.Ticker
-	metrics    *kprom.Metrics
+	metrics    *kprom.ConsumerMetrics
 	namespace  string
 	labels     map[string]string
 }
@@ -82,11 +82,13 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	)
 
 	c.exposeMetrics()
-	c.metrics = kprom.NewMetrics(c.namespace, "kafka", c.labels)
+
+	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
+	c.metrics = metrics.Consumer()
 
 	c.clientOptions = append(c.clientOptions,
 		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
-		kgo.WithHooks(instrumenting.Hooks(), c.metrics),
+		kgo.WithHooks(instrumenting.Hooks(), metrics.Hooks()),
 		kgo.KeepRetryableFetchErrors(),
 	)
 

@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.21.4
-	github.com/twmb/franz-go/plugin/kotel v1.6.0
+	github.com/twmb/franz-go/plugin/kotel v1.7.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
