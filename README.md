@@ -151,28 +151,15 @@ consumer, err := kafka.NewConsumer(
 
 ## Transactions
 
-To enable transactional producing, configure `TransactionalID` and use `RunInTx`.
+To enable transactional publishing, configure `TransactionalID` and use `RunInTx`.
 
-A producer configured with `TransactionalID` should produce records inside `RunInTx`.
-For regular sync and async producing, use a producer without `TransactionalID`.
-For transactional producing, use a dedicated producer instance with `TransactionalID`.
+A producer configured with `TransactionalID` should publish records inside `RunInTx`.
+
+For regular sync and async message publishing, use a producer without `TransactionalID`.
+For transactional message publishing, use a dedicated producer instance with `TransactionalID`.
 
 <!-- @formatter:off -->
-
 ```go
-txProducer, err := kafka.NewProducer(
-    kafka.WithProducerConfig(&kafka.ProducerConfig{
-        Brokers:         "localhost:9092",
-        TransactionalID: "orders-tx-producer",
-    }),
-)
-if err != nil {
-    log.Fatal(err)
-}
-defer txProducer.Close(context.Background())
-
-ctx := context.Background()
-
 if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
     if err := txProducer.ProduceSync(ctx, &kgo.Record{
         Topic: "orders.created",
@@ -194,8 +181,7 @@ if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
 }); err != nil {
     log.Fatal(err)
 }
-````
-
+```
 <!-- @formatter:on -->
 
 `RunInTx` opens a Kafka transaction, runs the provided function, and commits the transaction if the function returns
@@ -227,9 +213,16 @@ consumer, err := kafka.NewConsumer(
 
 ## Observability
 
-`xkafka` uses franz-go hooks for Kafka instrumentation and supports custom OpenTelemetry meter and tracer providers.
+`xkafka` uses franz-go hooks for Kafka client instrumentation and adds wrapper-level metrics for producer, consumer, and
+transaction workflows.
 
-### Producer
+It supports:
+
+* OpenTelemetry metrics and tracing
+* Prometheus metrics
+* Custom metrics namespace
+
+### Producer instrumentation
 
 <!-- @formatter:off -->
 
@@ -246,7 +239,7 @@ producer, err := kafka.NewProducer(
 
 <!-- @formatter:on -->
 
-### Consumer
+### Consumer instrumentation
 
 <!-- @formatter:off -->
 
@@ -267,13 +260,32 @@ consumer, err := kafka.NewConsumer(
 
 <!-- @formatter:on -->
 
-The following metric labels are added automatically:
+### Metric naming
 
-| Label            | Description                                                                |
-| ---------------- | -------------------------------------------------------------------------- |
-| `client_id`      | Generated client identifier, or configured client ID with a unique suffix. |
-| `client_kind`    | `producer` or `consumer`.                                                  |
-| `consumer_group` | Consumer group ID. Added only for consumers with a configured group.       |
+Prometheus metrics use the following naming pattern:
+
+```text
+<namespace>_kafka_<metric_name>
+```
+
+For example, with namespace `orders`:
+
+```text
+orders_kafka_produce_records_total
+orders_kafka_transactions_total
+orders_kafka_transaction_duration_seconds
+```
+
+If namespace is empty, metrics are exported with the `kafka_` prefix:
+
+```text
+kafka_produce_records_total
+kafka_transactions_total
+kafka_transaction_duration_seconds
+```
+
+For the full list of exported Prometheus metrics, see the package comment
+in [internal/pkg/kprom/metrics.go](internal/pkg/kprom/kprom.go).
 
 ## Configuration
 

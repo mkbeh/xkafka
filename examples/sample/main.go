@@ -113,6 +113,80 @@ func produceTxHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+func produceTxErrorHandler(w http.ResponseWriter, r *http.Request) {
+	var msg Message
+
+	err := json.NewDecoder(r.Body).Decode(&msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = txProducer.RunInTx(r.Context(), func(ctx context.Context) error {
+		payload, err := json.Marshal(&msg)
+		if err != nil {
+			return err
+		}
+
+		if err := txProducer.ProduceSync(ctx, &kgo.Record{
+			Key:   kafka.ConvertAnyToBytes(msg.ID),
+			Value: payload,
+		}); err != nil {
+			return err
+		}
+
+		return fmt.Errorf("forced error inside kafka transaction")
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func produceTxPanicHandler(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			http.Error(
+				w,
+				fmt.Sprintf("panic recovered in handler: %v", recovered),
+				http.StatusInternalServerError,
+			)
+		}
+	}()
+
+	var msg Message
+
+	err := json.NewDecoder(r.Body).Decode(&msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = txProducer.RunInTx(r.Context(), func(ctx context.Context) error {
+		payload, err := json.Marshal(&msg)
+		if err != nil {
+			return err
+		}
+
+		if err := txProducer.ProduceSync(ctx, &kgo.Record{
+			Key:   kafka.ConvertAnyToBytes(msg.ID),
+			Value: payload,
+		}); err != nil {
+			return err
+		}
+
+		panic("forced panic inside kafka transaction")
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func main() {
 	var err error
 
@@ -127,7 +201,7 @@ func main() {
 
 	producer, err = kafka.NewProducer(
 		kafka.WithProducerConfig(producerCfg),
-		kafka.WithProducerClientID("test-client"),
+		kafka.WithProducerClientID("sample-client"),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -144,7 +218,7 @@ func main() {
 
 	txProducer, err = kafka.NewProducer(
 		kafka.WithProducerConfig(txProducerCfg),
-		kafka.WithProducerClientID("test-tx-client"),
+		kafka.WithProducerClientID("sample-tx-client"),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -162,7 +236,7 @@ func main() {
 
 	consumer, err = kafka.NewConsumer(
 		kafka.WithConsumerConfig(consumerCfg),
-		kafka.WithConsumerClientID("test-client"),
+		kafka.WithConsumerClientID("sample-client"),
 		kafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
 		kafka.WithConsumerHandler(func(_ context.Context, msg *kgo.Record) error {
 			var message Message
@@ -192,6 +266,8 @@ func main() {
 	http.HandleFunc("/sync", produceSyncHandler)
 	http.HandleFunc("/async", produceAsyncHandler)
 	http.HandleFunc("/tx", produceTxHandler)
+	http.HandleFunc("/tx-error", produceTxErrorHandler)
+	http.HandleFunc("/tx-panic", produceTxPanicHandler)
 	http.Handle("/metrics", promhttp.Handler())
 
 	err = http.ListenAndServe("localhost:8080", nil)

@@ -1,28 +1,45 @@
-// Package kprom provides prometheus plug-in metrics for a kgo client.
+// Package kprom provides Prometheus plug-in metrics for a kgo client.
 //
-// This package tracks the following metrics under the following names,
-// all metrics being counter vecs:
-
+// This package tracks the following metrics under the following names:
+//
 //	#ns_kafka_connects_total{node_id="#{node}"}
 //	#ns_kafka_connect_errors_total{node_id="#{node}"}
 //	#ns_kafka_disconnects_total{node_id="#{node}"}
+//
 //	#ns_kafka_write_errors_total{node_id="#{node}"}
 //	#ns_kafka_write_bytes_total{node_id="#{node}"}
 //	#ns_kafka_write_wait_latencies{node_id="#{node}"}
 //	#ns_kafka_write_latencies{node_id="#{node}"}
+//
 //	#ns_kafka_read_errors_total{node_id="#{node}"}
 //	#ns_kafka_read_bytes_total{node_id="#{node}"}
 //	#ns_kafka_read_wait_latencies{node_id="#{node}"}
 //	#ns_kafka_read_latencies{node_id="#{node}"}
+//
 //	#ns_kafka_throttle_latencies{node_id="#{node}"}
+//
 //	#ns_kafka_produce_bytes_uncompressed_total{node_id="#{node}",topic="#{topic}"}
 //	#ns_kafka_produce_bytes_compressed_total{node_id="#{node}",topic="#{topic}"}
 //	#ns_kafka_produce_records_total{node_id="#{node}",topic="#{topic}"}
-//	#ns_kafka_fetch_bytes_uncompressed_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
-//	#ns_kafka_fetch_bytes_compressed_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
-//	#ns_kafka_fetch_records_total{node_id="#{node}",topic="#{topic}",group="#{group}"}
-//	#ns_kafka_consume_handle_timing{topic="#{topic}",group="#{group}"}
-//	#ns_kafka_consume_errors_total{topic="#{topic}",group="#{group}"}
+//	#ns_kafka_produce_errors_total{topic="#{topic}"}
+//
+//	#ns_kafka_fetch_bytes_uncompressed_total{node_id="#{node}",topic="#{topic}",consumer_group="#{consumer_group}"}
+//	#ns_kafka_fetch_bytes_compressed_total{node_id="#{node}",topic="#{topic}",consumer_group="#{consumer_group}"}
+//	#ns_kafka_fetch_records_total{node_id="#{node}",topic="#{topic}",consumer_group="#{consumer_group}"}
+//
+//	#ns_kafka_consume_handle_timing{topic="#{topic}",consumer_group="#{consumer_group}"}
+//	#ns_kafka_consume_errors_total{topic="#{topic}",consumer_group="#{consumer_group}"}
+//
+//	#ns_kafka_transactions_total{outcome="#{commit|error}"}
+//	#ns_kafka_transaction_duration_seconds
+//
+// The consume_handle_timing metric is a Prometheus summary, so it also exports
+// _sum, _count, and quantile series.
+//
+// Fetch metrics are collected at the Kafka client fetch layer. They can differ
+// from handler-level processing metrics, especially with transactions and
+// read_committed isolation level. Use consume_handle_timing_count to estimate
+// the number of records observed by the consumer handler.
 //
 // Const labels:
 //   - client_id=#{client_id}
@@ -30,11 +47,12 @@
 //
 // This can be used in a client like so:
 //
-//	m := kprom.NewMetrics("namespace", "subsystem", <labels>)
+//	m := kprom.NewMetrics("namespace", "kafka", labels)
 //	cl, err := kgo.NewClient(
-//	        kgo.WithHooks(m),
-//	        // ...other opts
+//		kgo.WithHooks(m),
+//		// ...other opts
 //	)
+
 package kprom
 
 import (
@@ -48,11 +66,19 @@ import (
 )
 
 const (
-	nodeLabel   = "node_id"
-	topicLabel  = "topic"
-	groupLabel  = "consumer_group"
-	clientLabel = "client_id"
-	kindLabel   = "client_kind"
+	nodeLabel    = "node_id"
+	topicLabel   = "topic"
+	groupLabel   = "consumer_group"
+	clientLabel  = "client_id"
+	kindLabel    = "client_kind"
+	outcomeLabel = "outcome"
+)
+
+type TransactionOutcome string
+
+const (
+	TransactionOutcomeCommit TransactionOutcome = "commit"
+	TransactionOutcomeError  TransactionOutcome = "error" // fn error, flush error, commit error, abort, panic
 )
 
 type Metrics struct {
@@ -77,12 +103,16 @@ type Metrics struct {
 	produceBatchesUncompressed *prometheus.CounterVec
 	produceBatchesCompressed   *prometheus.CounterVec
 	produceRecordsTotal        *prometheus.CounterVec
+	produceErrorsTotal         *prometheus.CounterVec
 
 	fetchBatchesUncompressed *prometheus.CounterVec
 	fetchBatchesCompressed   *prometheus.CounterVec
 	fetchRecordsTotal        *prometheus.CounterVec
 	consumerProcessTiming    *prometheus.SummaryVec
 	consumerHandleErrors     *prometheus.CounterVec
+
+	transactionsTotal   *prometheus.CounterVec
+	transactionDuration *prometheus.HistogramVec
 }
 
 // To see all hooks that are available, ctrl+f "Hook" in the package
@@ -164,6 +194,18 @@ func (m *Metrics) CollectHandleErrors(topic string) {
 	m.consumerHandleErrors.WithLabelValues(topic, m.labels[groupLabel]).Inc()
 }
 
+// CollectProduceError collects producer record errors.
+// Manual use.
+func (m *Metrics) CollectProduceError(topic string) {
+	m.produceErrorsTotal.WithLabelValues(topic).Inc()
+}
+
+// CollectTransaction collects transaction outcome and duration. Manual use.
+func (m *Metrics) CollectTransaction(startTime time.Time, outcome TransactionOutcome) {
+	m.transactionsTotal.WithLabelValues(string(outcome)).Inc()
+	m.transactionDuration.WithLabelValues().Observe(time.Since(startTime).Seconds())
+}
+
 func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metrics) {
 	constLabels := prometheus.Labels{
 		clientLabel: labels[clientLabel],
@@ -178,7 +220,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		connects: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_connects_total",
+			Name:        "connects_total",
 			Help:        "Total number of connections opened, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -186,7 +228,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		connectErrs: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_connect_errors_total",
+			Name:        "connect_errors_total",
 			Help:        "Total number of connection errors, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -194,7 +236,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		disconnects: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_disconnects_total",
+			Name:        "disconnects_total",
 			Help:        "Total number of connections closed, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -204,7 +246,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		writeErrs: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_write_errors_total",
+			Name:        "write_errors_total",
 			Help:        "Total number of write errors, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -212,7 +254,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		writeBytes: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_write_bytes_total",
+			Name:        "write_bytes_total",
 			Help:        "Total number of bytes written, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -220,7 +262,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		writeWaits: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_write_wait_latencies",
+			Name:        "write_wait_latencies",
 			Help:        "Latency of time spent waiting to write to Kafka, in seconds by broker",
 			Buckets:     prometheus.ExponentialBuckets(0.0001, 1.5, 20),
 			ConstLabels: constLabels,
@@ -229,7 +271,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		writeTimings: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_write_latencies",
+			Name:        "write_latencies",
 			Help:        "Latency of time spent writing to Kafka, in seconds by broker",
 			Buckets:     prometheus.ExponentialBuckets(0.0001, 1.5, 20),
 			ConstLabels: constLabels,
@@ -240,7 +282,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		readErrs: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_read_errors_total",
+			Name:        "read_errors_total",
 			Help:        "Total number of read errors, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -248,7 +290,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		readBytes: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_read_bytes_total",
+			Name:        "read_bytes_total",
 			Help:        "Total number of bytes read, by broker",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
@@ -256,7 +298,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		readWaits: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_read_wait_latencies",
+			Name:        "read_wait_latencies",
 			Help:        "Latency of time spent waiting to read from Kafka, in seconds by broker",
 			Buckets:     prometheus.ExponentialBuckets(0.0001, 1.5, 20),
 			ConstLabels: constLabels,
@@ -265,7 +307,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		readTimings: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_read_latencies",
+			Name:        "read_latencies",
 			Help:        "Latency of time spent reading from Kafka, in seconds by broker",
 			Buckets:     prometheus.ExponentialBuckets(0.0001, 1.5, 20),
 			ConstLabels: constLabels,
@@ -276,18 +318,18 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		throttles: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_throttle_latencies",
+			Name:        "throttle_latencies",
 			Help:        "Latency of Kafka request throttles, in seconds by broker",
 			Buckets:     prometheus.ExponentialBuckets(0.0001, 1.5, 20),
 			ConstLabels: constLabels,
 		}, []string{nodeLabel}),
 
-		// produces & consumes
+		// produce
 
 		produceBatchesUncompressed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_produce_bytes_uncompressed_total",
+			Name:        "produce_bytes_uncompressed_total",
 			Help:        "Total number of uncompressed bytes produced, by broker and topic",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel}),
@@ -295,7 +337,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		produceBatchesCompressed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_produce_bytes_compressed_total",
+			Name:        "produce_bytes_compressed_total",
 			Help:        "Total number of compressed bytes actually produced, by topic and partition",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel}),
@@ -303,15 +345,25 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		produceRecordsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_produce_records_total",
+			Name:        "produce_records_total",
 			Help:        "Total number of records produced",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel}),
 
+		produceErrorsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   subsystem,
+			Name:        "produce_errors_total",
+			Help:        "Total number of producer record errors by topic",
+			ConstLabels: constLabels,
+		}, []string{topicLabel}),
+
+		// fetch
+
 		fetchBatchesUncompressed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_fetch_bytes_uncompressed_total",
+			Name:        "fetch_bytes_uncompressed_total",
 			Help:        "Total number of uncompressed bytes fetched, by topic and partition",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel, groupLabel}),
@@ -319,7 +371,7 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		fetchBatchesCompressed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_fetch_bytes_compressed_total",
+			Name:        "fetch_bytes_compressed_total",
 			Help:        "Total number of compressed bytes actually fetched, by topic and partition",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel, groupLabel}),
@@ -327,10 +379,12 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 		fetchRecordsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   subsystem,
-			Name:        "kafka_fetch_records_total",
+			Name:        "fetch_records_total",
 			Help:        "Total number of records fetched",
 			ConstLabels: constLabels,
 		}, []string{nodeLabel, topicLabel, groupLabel}),
+
+		// consumer wrapper metrics
 
 		consumerProcessTiming: promauto.NewSummaryVec(prometheus.SummaryOpts{
 			Namespace:   namespace,
@@ -349,5 +403,24 @@ func NewMetrics(namespace, subsystem string, labels prometheus.Labels) (m *Metri
 			Help:        "Number of messages failed to consume",
 			ConstLabels: constLabels,
 		}, []string{topicLabel, groupLabel}),
+
+		// producer transaction wrapper metrics
+
+		transactionsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   subsystem,
+			Name:        "transactions_total",
+			Help:        "Total number of Kafka transactions by result",
+			ConstLabels: constLabels,
+		}, []string{outcomeLabel}),
+
+		transactionDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace:   namespace,
+			Subsystem:   subsystem,
+			Name:        "transaction_duration_seconds",
+			Help:        "Kafka transaction duration in seconds",
+			Buckets:     prometheus.ExponentialBuckets(0.001, 2, 16),
+			ConstLabels: constLabels,
+		}, []string{}),
 	}
 }
