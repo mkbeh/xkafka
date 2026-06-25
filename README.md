@@ -285,7 +285,7 @@ kafka_transaction_duration_seconds
 ```
 
 For the full list of exported Prometheus metrics, see the package comment
-in [internal/pkg/kprom/metrics.go](internal/pkg/kprom/kprom.go).
+in [internal/pkg/kprom/metrics.go](internal/pkg/kprom/metrics.go).
 
 ## Configuration
 
