@@ -30,6 +30,10 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 1
 
+      # Share groups for single-broker dev environment
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+
       # Settings
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
@@ -60,33 +64,42 @@ services:
       - /bin/bash
       - -lc
       - |
+        set -e
+        
+        TOPICS="sample-topic sample-tx-topic sample-share-topic sample-share-batch-topic"
+        
         echo "init-kafka started"
-
+        
         echo "Waiting for Kafka..."
         until kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do
           echo "Kafka is not ready yet..."
           sleep 2
         done
-
-        echo "Creating topic: sample-topic"
-
-        kafka-topics \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic sample-topic \
-          --replication-factor 1 \
-          --partitions 3
-
+        
+        for topic in $${TOPICS}; do
+          echo "Creating topic: $${topic}"
+        
+          kafka-topics \
+            --bootstrap-server kafka:9092 \
+            --create \
+            --if-not-exists \
+            --topic "$${topic}" \
+            --replication-factor 1 \
+            --partitions 3
+        done
+        
         echo "Topics after creation:"
         kafka-topics --bootstrap-server kafka:9092 --list
-
-        echo "Topic description:"
-        kafka-topics \
-          --bootstrap-server kafka:9092 \
-          --describe \
-          --topic sample-topic
-
+        
+        echo "Topic descriptions:"
+        
+        for topic in $${TOPICS}; do
+          kafka-topics \
+            --bootstrap-server kafka:9092 \
+            --describe \
+            --topic "$${topic}"
+        done
+        
         echo "init-kafka finished"
     networks:
       - sample-network

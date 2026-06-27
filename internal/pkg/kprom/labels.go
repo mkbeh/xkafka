@@ -5,7 +5,6 @@ import (
 )
 
 const (
-	nodeLabel    = "node_id"
 	topicLabel   = "topic"
 	groupLabel   = "consumer_group"
 	clientLabel  = "client_id"

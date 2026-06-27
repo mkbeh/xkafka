@@ -1,7 +1,10 @@
 version: "2"
+
 run:
   go: "1.26"
+  timeout: 5m
   allow-parallel-runners: true
+
 linters:
   default: none
   enable:
@@ -10,6 +13,8 @@ linters:
     - bodyclose
     - copyloopvar
     - durationcheck
+    - errcheck
+    - errorlint
     - exhaustive
     - gocritic
     - goprintffuncname
@@ -24,17 +29,24 @@ linters:
     - rowserrcheck
     - sloglint
     - sqlclosecheck
+    - staticcheck
     - unconvert
     - unparam
     - unused
     - usetesting
     - wastedassign
     - whitespace
+
   settings:
+    errcheck:
+      check-type-assertions: true
+
     errorlint:
       errorf: false
+
     exhaustive:
       default-signifies-exhaustive: true
+
     gocritic:
       disabled-checks:
         - appendAssign
@@ -61,15 +73,18 @@ linters:
           sizeThreshold: 256
         rangeValCopy:
           sizeThreshold: 256
+
     gosec:
       excludes:
         - G104
-        - G404
         - G115
+        - G404
+
     nolintlint:
       require-explanation: true
       require-specific: true
       allow-unused: false
+
     revive:
       confidence: 0.8
       severity: warning
@@ -105,7 +120,6 @@ linters:
         - name: superfluous-else
         - name: time-equal
         - name: time-naming
-        - name: var-declaration
         - name: unconditional-recursion
         - name: unexported-naming
         - name: unexported-return
@@ -113,7 +127,9 @@ linters:
         - name: unreachable-code
         - name: unused-parameter
         - name: useless-break
+        - name: var-declaration
         - name: waitgroup-by-value
+
     sloglint:
       no-mixed-args: true
       no-global: default
@@ -122,22 +138,26 @@ linters:
       no-raw-keys: false
       key-naming-case: snake
       args-on-sep-lines: true
+
     staticcheck:
       checks:
         - all
         - -SA1012
         - -SA1019
+        - -ST1000
+
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples
+      - third_party/
+      - builtin/
+      - examples/
+
 issues:
   max-same-issues: 0
+
 formatters:
   enable:
-    - gofmt
     - gofumpt
     - goimports
   settings:
@@ -146,6 +166,6 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - third_party/
+      - builtin/
+      - examples/
