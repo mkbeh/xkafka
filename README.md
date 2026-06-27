@@ -13,10 +13,12 @@
 workflows: producing messages, consuming records through handlers, committing offsets after successful processing, and
 exposing Kafka observability with OpenTelemetry and Prometheus.
 
+Runnable examples and local Kafka setup are available in [examples](examples).
+
 ## Features
 
 * **Producer**: Synchronous, asynchronous, and transactional message publishing.
-* **Consumer**: Per-record and batch handlers for flexible message processing.
+* **Consumer**: Per-record and batch handlers for regular consumer groups and share groups.
 * **Commits**: Automatic offset commits only after successful processing.
 * **Retries**: Built-in retry handling with configurable backoff strategies.
 * **Observability**: OpenTelemetry instrumentation and Prometheus metrics hooks out of the box.
@@ -34,132 +36,84 @@ go get github.com/mkbeh/xkafka
 The examples below show the basic sending and receiving flow. For production workloads, tune retries, offset commits,
 observability, security, and graceful shutdown behavior for your needs.
 
-### Sending messages
-
-```go
-package main
-
-import (
-	"context"
-	"log"
-
-	kafka "github.com/mkbeh/xkafka"
-	"github.com/twmb/franz-go/pkg/kgo"
-)
-
-func main() {
-	producer, err := kafka.NewProducer(
-		kafka.WithProducerConfig(&kafka.ProducerConfig{
-			Brokers: "localhost:9092",
-		}),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer producer.Close(context.Background())
-
-	ctx := context.Background()
-
-	// Async (fire-and-forget with logging on error)
-	producer.ProduceAsync(ctx, &kgo.Record{
-		Topic: "my-topic",
-		Value: []byte("hello async"),
-	})
-
-	// Sync produce waits until the broker acknowledges the record.
-	if err := producer.ProduceSync(ctx, &kgo.Record{
-		Topic: "my-topic",
-		Value: []byte("hello sync"),
-	}); err != nil {
-		log.Fatal(err)
-	}
-}
-```
-
-### Receiving messages
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"log"
-
-	kafka "github.com/mkbeh/xkafka"
-	"github.com/twmb/franz-go/pkg/kgo"
-)
-
-func main() {
-	consumer, err := kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{
-			Enabled: true,
-			Brokers: "localhost:9092",
-			Topics:  "my-topic",
-			Group:   "my-group",
-		}),
-		kafka.WithConsumerHandler(func(ctx context.Context, record *kgo.Record) error {
-			fmt.Printf("key=%s value=%s\n", record.Key, record.Value)
-			return nil
-		}),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx := context.Background()
-
-	if err := consumer.PreRun(ctx); err != nil {
-		log.Fatal(err)
-	}
-	defer consumer.Shutdown(ctx)
-
-	if err := consumer.Run(ctx); err != nil {
-		log.Fatal(err)
-	}
-}
-
-```
-
-### Receiving messages in batches
-
 <!-- @formatter:off -->
-
 ```go
-consumer, err := kafka.NewConsumer(
-    kafka.WithConsumerConfig(&kafka.ConsumerConfig{
-        Enabled:        true,
-        Brokers:        "localhost:9092",
-        Topics:         "orders.created",
-        Group:          "orders-batch-worker-group",
-        MaxPollRecords: 500,
-    }),
-    kafka.WithConsumerBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
-        for _, record := range records {
-            // process record
-        }
+ctx := context.Background()
 
-        return nil
-    }),
+// Initialize the Producer
+producer, err := kafka.NewProducer(
+	kafka.WithProducerConfig(&kafka.ProducerConfig{
+		Brokers: "localhost:9092",
+	}),
 )
-```
+if err != nil {
+	log.Fatal(err)
+}
+defer producer.Close(ctx) // Gracefully close the producer on exit
 
+// Initialize the Consumer
+consumer, err := kafka.NewConsumer(
+	kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+		Enabled: true,
+		Brokers: "localhost:9092",
+		Topics:  "orders.created",
+		Group:   "orders-worker-group",
+	}),
+	kafka.WithConsumerHandler(func(ctx context.Context, record *kgo.Record) error {
+		fmt.Printf("received: topic=%s key=%s value=%s\n", record.Topic, record.Key, record.Value)
+		return nil // Returning nil automatically acknowledges the record
+	}),
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+// Connect and verify connectivity to Kafka
+if err := consumer.PreRun(ctx); err != nil {
+	log.Fatal(err)
+}
+defer consumer.Shutdown(ctx) // Ensure all updates are flushed and connections closed on exit
+
+// Start the consumer loop in a separate goroutine as it blocks
+go func() {
+	if err := consumer.Run(ctx); err != nil {
+		log.Printf("consumer stopped: %v", err)
+	}
+}()
+
+// Publish a test message
+if err := producer.ProduceSync(ctx, &kgo.Record{
+	Topic: "orders.created",
+	Key:   []byte("order-1"),
+	Value: []byte("created"),
+}); err != nil {
+	log.Fatal(err)
+}
+```
 <!-- @formatter:on -->
 
-> **Note:** Offsets are committed only after successful handler execution.
-> If the handler returns an error, processing is retried after `KAFKA_SUSPEND_PROCESSING_TIMEOUT` (`30s` by default).
+> Records are considered processed only when the handler returns `nil`.
+> If the handler returns an error, offsets are not committed and processing resumes after
+`KAFKA_SUSPEND_PROCESSING_TIMEOUT`.
 
 ## Transactions
 
 To enable transactional publishing, configure `TransactionalID` and use `RunInTx`.
 
-A producer configured with `TransactionalID` should publish records inside `RunInTx`.
-
-For regular sync and async message publishing, use a producer without `TransactionalID`.
-For transactional message publishing, use a dedicated producer instance with `TransactionalID`.
-
 <!-- @formatter:off -->
+
 ```go
+txProducer, err := kafka.NewProducer(
+    kafka.WithProducerConfig(&kafka.ProducerConfig{
+        Brokers:         "localhost:9092",
+        TransactionalID: "orders-tx-producer",
+    }),
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer txProducer.Close(context.Background())
+
 if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
     if err := txProducer.ProduceSync(ctx, &kgo.Record{
         Topic: "orders.created",
@@ -182,82 +136,39 @@ if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
     log.Fatal(err)
 }
 ```
-<!-- @formatter:on -->
-
-`RunInTx` opens a Kafka transaction, runs the provided function, and commits the transaction if the function returns
-`nil`.
-
-If the function returns an error, the transaction is aborted.
-
-Use `ProduceSync` inside `RunInTx`. `ProduceAsync` is not recommended inside a transaction because the function may
-return before the asynchronous produce result is known.
-
-Consumers that should ignore aborted transactional records must use `read_committed` isolation level:
-
-<!-- @formatter:off -->
-
-```go
-consumer, err := kafka.NewConsumer(
-    kafka.WithConsumerConfig(&kafka.ConsumerConfig{
-        Enabled: true,
-        Brokers: "localhost:9092",
-        Topics:  "orders.created",
-        Group:   "orders-worker-group",
-    }),
-    kafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
-    kafka.WithConsumerHandler(handler),
-)
-```
 
 <!-- @formatter:on -->
+
+`RunInTx` executes the function inside a Kafka transaction: it commits on `nil` and aborts on error or panic.
+
+Consumers that should not read aborted transactional records must use the `read_committed` isolation level.
 
 ## Observability
 
-`xkafka` uses franz-go hooks for Kafka client instrumentation and adds wrapper-level metrics for producer, consumer, and
-transaction workflows.
+`xkafka` uses `franz-go` hooks for Kafka client instrumentation and adds wrapper-level metrics for producer, consumer,
+share consumer, and transaction workflows.
 
-It supports:
+* **OpenTelemetry:** Native support for both metrics and distributed tracing.
+* **Prometheus:** Built-in metrics hooks for seamless scraping.
 
-* OpenTelemetry metrics and tracing
-* Prometheus metrics
-* Custom metrics namespace
-
-### Producer instrumentation
+Producer options:
 
 <!-- @formatter:off -->
-
 ```go
-producer, err := kafka.NewProducer(
-    kafka.WithProducerConfig(&kafka.ProducerConfig{
-        Brokers: "localhost:9092",
-    }),
-    kafka.WithProducerMeterProvider(meterProvider),
-    kafka.WithProducerTracerProvider(tracerProvider),
-    kafka.WithProducerMetricsNamespace("orders"),
-)
+kafka.WithProducerMeterProvider(meterProvider)
+kafka.WithProducerTracerProvider(tracerProvider)
+kafka.WithProducerMetricsNamespace("orders")
 ```
-
 <!-- @formatter:on -->
 
-### Consumer instrumentation
+Consumer options:
 
 <!-- @formatter:off -->
-
 ```go
-consumer, err := kafka.NewConsumer(
-    kafka.WithConsumerConfig(&kafka.ConsumerConfig{
-        Enabled: true,
-        Brokers: "localhost:9092",
-        Topics:  "orders.created",
-        Group:   "orders-worker-group",
-    }),
-    kafka.WithConsumerMeterProvider(meterProvider),
-    kafka.WithConsumerTracerProvider(tracerProvider),
-    kafka.WithConsumerMetricsNamespace("orders"),
-    kafka.WithConsumerHandler(handler),
-)
+kafka.WithConsumerMeterProvider(meterProvider)
+kafka.WithConsumerTracerProvider(tracerProvider)
+kafka.WithConsumerMetricsNamespace("orders")
 ```
-
 <!-- @formatter:on -->
 
 ### Metric naming
@@ -290,10 +201,11 @@ in [internal/pkg/kprom/metrics.go](internal/pkg/kprom/metrics.go).
 ## Configuration
 
 `ProducerConfig` and `ConsumerConfig` can be configured directly as Go structs.
-Their fields also include `envconfig` tags, so you can populate them from environment variables using your preferred
+
+The structs also include `envconfig` tags, so you can populate them from environment variables using your preferred
 configuration layer.
 
-### Common configuration
+**Common environment variables:**
 
 | ENV                       | Description                                                            |
 | ------------------------- | ---------------------------------------------------------------------- |
@@ -310,7 +222,7 @@ configuration layer.
 | `KAFKA_MAX_WRITE_BYTES`   | Maximum bytes written to a broker connection in one write.             |
 | `KAFKA_MAX_READ_BYTES`    | Maximum bytes read from a broker response.                             |
 
-### Producer configuration
+**Producer environment variables:**
 
 | ENV                              | Description                                                  |
 | -------------------------------- | ------------------------------------------------------------ |
@@ -325,13 +237,18 @@ configuration layer.
 | `KAFKA_TRANSACTIONAL_ID`         | Enables transactional producing.                             |
 | `KAFKA_TRANSACTION_TIMEOUT`      | Maximum allowed transaction duration.                        |
 
-### Consumer configuration
+**Cosnumer environment variables:**
 
 | ENV                                | Default | Description                                                      |
 | ---------------------------------- | ------: | ---------------------------------------------------------------- |
 | `KAFKA_ENABLED`                    | `false` | Enables the consumer. If `false`, `PreRun` and `Run` are no-ops. |
 | `KAFKA_TOPICS`                     |       — | Comma-separated list of topics to consume.                       |
 | `KAFKA_GROUP`                      |       — | Consumer group ID. Required for offset commits.                  |
+| `KAFKA_SHARE_GROUP`                     |       — | Share group ID. Use with share group handlers.                   |
+| `KAFKA_SHARE_MAX_RECORDS`               |       — | Maximum records returned per share fetch.                        |
+| `KAFKA_SHARE_MAX_RECORDS_STRICT`        | `false` | Strictly cap records per share fetch.                            |
+| `KAFKA_SHARE_REJECT_AFTER_DELIVERIES`   |       — | Reject failed share records after this delivery count.           |
+| `KAFKA_SHARE_RELEASE_TIMEOUT`           |       — | Delay before releasing failed share records for redelivery.      |
 | `KAFKA_MAX_POLL_RECORDS`           |   `100` | Maximum records returned per poll.                               |
 | `KAFKA_POLL_INTERVAL`              | `300ms` | Interval between polls.                                          |
 | `KAFKA_SKIP_FATAL_ERRORS`          |  `true` | Continue after non-retryable fetch errors.                       |
@@ -343,7 +260,6 @@ configuration layer.
 | `KAFKA_SESSION_TIMEOUT`            |   `45s` | Maximum time between heartbeats before rebalance.                |
 | `KAFKA_REBALANCE_TIMEOUT`          |       — | Maximum time for members to rejoin during rebalance.             |
 | `KAFKA_HEARTBEAT_INTERVAL`         |       — | Heartbeat interval.                                              |
-| `KAFKA_REQUIRE_STABLE_FETCH_OFFS`  | `false` | Require stable offsets before consuming.                         |
 | `KAFKA_FETCH_MAX_WAIT`             |       — | Maximum broker wait time before returning a fetch response.      |
 | `KAFKA_FETCH_MAX_BYTES`            |       — | Maximum bytes per fetch response.                                |
 | `KAFKA_FETCH_MIN_BYTES`            |       — | Minimum bytes the broker should accumulate before responding.    |

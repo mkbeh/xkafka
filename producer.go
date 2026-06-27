@@ -55,10 +55,11 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 	if p.logger == nil {
 		p.logger = slog.Default()
 	}
-	p.logger.With(kslog.Component("kafka_producer"))
+	p.logger = p.logger.With(kslog.Component("kafka_producer"))
 
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(p.meterOptions...)),
+		kotel.WithTracer(kotel.NewTracer(p.tracerOptions...)),
 	)
 
 	p.exposeMetrics()
@@ -77,6 +78,7 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 	}
 
 	if err := p.conn.Ping(context.Background()); err != nil {
+		p.conn.Close()
 		return nil, fmt.Errorf("kafka: %w", err)
 	}
 
@@ -88,12 +90,11 @@ func (p *Producer) Close(ctx context.Context) {
 		return
 	}
 
-	defer p.conn.Close()
-
-	err := p.conn.Flush(ctx)
-	if err != nil {
-		p.logger.ErrorContext(ctx, "producer flush error", kslog.Error(err))
+	if err := p.conn.Flush(ctx); err != nil {
+		p.logger.ErrorContext(ctx, "error flushing producer records", kslog.Error(err))
 	}
+
+	p.conn.Close()
 }
 
 func (p *Producer) ProduceAsync(ctx context.Context, record *kgo.Record) {
@@ -156,9 +157,6 @@ func (p *Producer) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		return err
 	}
 
-	// EndTransaction does not flush buffered records by itself.
-	// ProduceSync already waits for its records, but Flush keeps RunInTx safe
-	// if fn used asynchronous or buffered produce calls.
 	if err = p.conn.Flush(ctx); err != nil {
 		return fmt.Errorf("kafka: flush buffered records: %w", err)
 	}

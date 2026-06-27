@@ -45,6 +45,7 @@ func WithProducerConfig(cfg *ProducerConfig) ProducerOption {
 			withProducerBrokerMaxReadBytes(cfg.BrokerMaxReadBytes),
 			withProducerMetadataMaxAge(cfg.MetadataMaxAge),
 			withProducerMetadataMinAge(cfg.MetadataMinAge),
+			withProducerAlwaysRetryEOF(cfg.AlwaysRetryEOF),
 			withDefaultProduceTopic(cfg.DefaultProduceTopic),
 			withProducerBatchMaxBytes(cfg.ProducerBatchMaxBytes),
 			withProducerMaxBufferedRecords(cfg.MaxBufferedRecords),
@@ -114,6 +115,23 @@ func WithProducerRequiredAcks(acks kgo.Acks) ProducerOption {
 func WithProducerBatchCompression(preference ...kgo.CompressionCodec) ProducerOption {
 	return producerOptionFunc(func(p *Producer) {
 		p.addClientOption(kgo.ProducerBatchCompression(preference...))
+	})
+}
+
+func WithProducerAllowIdempotentProduceCancellation() ProducerOption {
+	return producerOptionFunc(func(p *Producer) {
+		p.addClientOption(kgo.AllowIdempotentProduceCancellation())
+	})
+}
+
+// WithProducerBatchMaxBytesFn sets a per-topic maximum record batch size.
+//
+// Use this when different topics have different broker-side max.message.bytes values.
+func WithProducerBatchMaxBytesFn(fn func(topic string) int32) ProducerOption {
+	return producerOptionFunc(func(p *Producer) {
+		if fn != nil {
+			p.addClientOption(kgo.ProducerBatchMaxBytesFn(fn))
+		}
 	})
 }
 
@@ -187,6 +205,8 @@ type ProducerConfig struct {
 	MetadataMaxAge time.Duration `envconfig:"KAFKA_METADATA_MAX_AGE"`
 	// MetadataMinAge sets the minimum time between metadata queries.
 	MetadataMinAge time.Duration `envconfig:"KAFKA_METADATA_MIN_AGE"`
+	// AlwaysRetryEOF retries EOF errors instead of treating them as terminal connection failures.
+	AlwaysRetryEOF bool `envconfig:"KAFKA_ALWAYS_RETRY_EOF"`
 
 	// DefaultProduceTopic sets the default topic to produce to if the topic field
 	// is empty in a Record.
@@ -208,7 +228,7 @@ type ProducerConfig struct {
 	RecordRetries int `envconfig:"KAFKA_RECORD_RETRIES"`
 	// ProducerLinger sets how long individual topic partitions will linger waiting
 	// for more records before triggering a request to be built.
-	ProducerLinger time.Duration `envconfig:"KAFKA_PRODUCER_LINGER"`
+	ProducerLinger *time.Duration `envconfig:"KAFKA_PRODUCER_LINGER"`
 	// RecordDeliveryTimeout sets a rough time of how long a record can sit around
 	// in a batch before timing out.
 	RecordDeliveryTimeout time.Duration `envconfig:"KAFKA_RECORD_DELIVERY_TIMEOUT"`
@@ -365,6 +385,14 @@ func withProducerMetadataMinAge(age time.Duration) ProducerOption {
 	})
 }
 
+func withProducerAlwaysRetryEOF(enabled bool) ProducerOption {
+	return producerOptionFunc(func(p *Producer) {
+		if enabled {
+			p.addClientOption(kgo.AlwaysRetryEOF())
+		}
+	})
+}
+
 func withDefaultProduceTopic(t string) ProducerOption {
 	return producerOptionFunc(func(p *Producer) {
 		if t != "" {
@@ -413,10 +441,10 @@ func withProducerRecordRetries(n int) ProducerOption {
 	})
 }
 
-func withProducerLinger(linger time.Duration) ProducerOption {
+func withProducerLinger(linger *time.Duration) ProducerOption {
 	return producerOptionFunc(func(p *Producer) {
-		if linger > 0 {
-			p.addClientOption(kgo.ProducerLinger(linger))
+		if linger != nil {
+			p.addClientOption(kgo.ProducerLinger(*linger))
 		}
 	})
 }

@@ -34,6 +34,9 @@ type Consumer struct {
 	suspendProcessingTimeout time.Duration
 	suspendCommittingTimeout time.Duration
 
+	shareReleaseTimeout        time.Duration
+	shareRejectAfterDeliveries int32
+
 	clientOptions []kgo.Opt
 	meterOptions  []kotel.MeterOpt
 	tracerOptions []kotel.TracerOpt
@@ -75,10 +78,11 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	if c.logger == nil {
 		c.logger = slog.Default()
 	}
-	c.logger.With(kslog.Component("kafka_consumer"))
+	c.logger = c.logger.With(kslog.Component("kafka_consumer"))
 
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(c.meterOptions...)),
+		kotel.WithTracer(kotel.NewTracer(c.tracerOptions...)),
 	)
 
 	c.exposeMetrics()
@@ -106,6 +110,7 @@ func (c *Consumer) PreRun(ctx context.Context) error {
 	}
 
 	if err := conn.Ping(ctx); err != nil {
+		c.conn.Close()
 		return err
 	}
 
@@ -115,18 +120,27 @@ func (c *Consumer) PreRun(ctx context.Context) error {
 	return nil
 }
 
-func (c *Consumer) Shutdown(_ context.Context) error {
+func (c *Consumer) Shutdown(ctx context.Context) error {
+	var err error
+
 	close(c.exitCh)
 
 	if c.pollTicker != nil {
 		c.pollTicker.Stop()
 	}
 
-	if c.conn != nil {
-		c.conn.Close()
+	if c.conn == nil {
+		return nil
 	}
 
-	return nil
+	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
+		c.logger.ErrorContext(ctx, "error flushing consumer acks ", kslog.Error(err))
+		err = flushErr
+	}
+
+	c.conn.Close()
+
+	return err
 }
 
 func (c *Consumer) Run(ctx context.Context) error {
@@ -283,6 +297,153 @@ infiniteLoop:
 				break infiniteLoop
 			}
 		}
+	}
+}
+
+func (c *Consumer) handleShareFetchesBatch(handler BatchHandlerFunc) fetchesHandler {
+	return func(ctx context.Context, fetches kgo.Fetches) {
+		records := fetches.Records()
+		if len(records) == 0 {
+			return
+		}
+
+		defer func(startTime time.Time) {
+			for _, r := range records {
+				c.metrics.CollectHandleProcessTiming(startTime, r.Topic)
+			}
+		}(time.Now())
+
+		select {
+		case <-c.exitCh:
+			return
+		default:
+			if err := handler(ctx, records); err != nil {
+				c.metrics.CollectHandleErrors("")
+				c.logger.ErrorContext(ctx, "error handling share group records",
+					kslog.Error(err),
+					kslog.Records(c.formatRecords(records...)),
+				)
+				c.ackErrorRecordsEternal(ctx, records)
+			} else {
+				c.ackRecordsEternal(ctx, records)
+			}
+		}
+	}
+}
+
+func (c *Consumer) handleShareFetchesEach(handler HandlerFunc) fetchesHandler {
+	handleAndAck := func(ctx context.Context, record *kgo.Record) {
+		defer func(startTime time.Time) {
+			c.metrics.CollectHandleProcessTiming(startTime, record.Topic)
+		}(time.Now())
+
+		if err := handler(ctx, record); err != nil {
+			c.metrics.CollectHandleErrors(record.Topic)
+			c.logger.ErrorContext(ctx, "error handling share group record",
+				kslog.Error(err),
+				kslog.Records(c.formatRecords(record)),
+			)
+			c.ackRecordEternal(ctx, record, c.errorAckStatus(record))
+		} else {
+			c.ackRecordEternal(ctx, record, kgo.AckAccept)
+		}
+	}
+
+	return func(ctx context.Context, fetches kgo.Fetches) {
+		iter := fetches.RecordIter()
+
+		for !iter.Done() {
+			record := iter.Next()
+
+			select {
+			case <-c.exitCh:
+				return
+			default:
+				handleAndAck(ctx, record)
+			}
+		}
+	}
+}
+
+func (c *Consumer) ackRecordEternal(ctx context.Context, record *kgo.Record, status kgo.AckStatus) {
+	switch status {
+	case kgo.AckRelease:
+		c.waitAckReleaseTimeout(ctx)
+	case kgo.AckReject, kgo.AckAccept, kgo.AckRenew:
+		// no-op
+	}
+
+	record.Ack(status)
+	c.flushAcksEternal(ctx, record.Topic)
+}
+
+func (c *Consumer) ackRecordsEternal(ctx context.Context, records []*kgo.Record) {
+	for _, record := range records {
+		record.Ack(kgo.AckAccept)
+	}
+
+	c.flushAcksEternal(ctx, "")
+}
+
+func (c *Consumer) ackErrorRecordsEternal(ctx context.Context, records []*kgo.Record) {
+	releaseWaited := false
+
+	for _, record := range records {
+		status := c.errorAckStatus(record)
+
+		if status == kgo.AckRelease && !releaseWaited {
+			c.waitAckReleaseTimeout(ctx)
+			releaseWaited = true
+		}
+
+		record.Ack(status)
+	}
+
+	c.flushAcksEternal(ctx, "")
+}
+
+func (c *Consumer) errorAckStatus(record *kgo.Record) kgo.AckStatus {
+	if c.shareRejectAfterDeliveries > 0 &&
+		record.DeliveryCount() >= c.shareRejectAfterDeliveries {
+		return kgo.AckReject
+	}
+
+	return kgo.AckRelease
+}
+
+func (c *Consumer) flushAcksEternal(ctx context.Context, topic string) {
+	for {
+		select {
+		case <-c.exitCh:
+			return
+		default:
+			if err := c.conn.FlushAcks(ctx); err != nil {
+				c.metrics.CollectHandleErrors(topic)
+				c.logger.ErrorContext(ctx, "error flushing share group acks", kslog.Error(err))
+				time.Sleep(c.suspendCommittingTimeout)
+				continue
+			}
+
+			return
+		}
+	}
+}
+
+func (c *Consumer) waitAckReleaseTimeout(ctx context.Context) {
+	if c.shareReleaseTimeout <= 0 {
+		return
+	}
+
+	timer := time.NewTimer(c.shareReleaseTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-c.exitCh:
+		return
+	case <-timer.C:
+		return
 	}
 }
 

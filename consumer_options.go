@@ -42,12 +42,16 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 			withConsumeRegex(cfg.ConsumeRegex),
 			withConsumeTopics(strings.Split(cfg.Topics, ",")...),
 			withConsumerGroup(cfg.Group),
+			withConsumerShareGroup(cfg.ShareGroup),
+			withShareMaxRecords(cfg.ShareMaxRecords),
+			withShareMaxRecordsStrict(cfg.ShareMaxRecordsStrict),
+			withShareRejectAfterDeliveries(cfg.ShareRejectAfterDeliveries),
+			withShareReleaseTimeout(cfg.ShareReleaseTimeout),
 			withConsumerInstanceID(cfg.InstanceID),
 			withConsumerDisableFetchSessions(cfg.DisableFetchSessions),
 			withSessionTimeout(cfg.SessionTimeout),
 			withRebalanceTimeout(cfg.RebalanceTimeout),
 			withHeartbeatInterval(cfg.HeartbeatInterval),
-			withRequireStableFetchOffsets(cfg.RequireStableFetchOffsets),
 			withConsumerRequestTimeoutOverhead(cfg.RequestTimeoutOverhead),
 			withConsumerConnIdleTimeout(cfg.ConnIdleTimeout),
 			withConsumerDialTimeout(cfg.DialTimeout),
@@ -57,6 +61,9 @@ func WithConsumerConfig(cfg *ConsumerConfig) ConsumerOption {
 			withConsumerBrokerMaxReadBytes(cfg.BrokerMaxReadBytes),
 			withConsumerMetadataMaxAge(cfg.MetadataMaxAge),
 			withConsumerMetadataMinAge(cfg.MetadataMinAge),
+			withConsumerAlwaysRetryEOF(cfg.AlwaysRetryEOF),
+			withConsumerRack(cfg.Rack),
+			withConsumerMaxConcurrentFetches(cfg.MaxConcurrentFetches),
 		}
 
 		for _, opt := range opts {
@@ -128,6 +135,18 @@ func WithConsumerHandler(handlerFunc HandlerFunc) ConsumerOption {
 	})
 }
 
+func WithConsumerShareHandler(handlerFunc HandlerFunc) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.handleFetches = c.handleShareFetchesEach(handlerFunc)
+	})
+}
+
+func WithConsumerShareBatchHandler(handlerFunc BatchHandlerFunc) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		c.handleFetches = c.handleShareFetchesBatch(handlerFunc)
+	})
+}
+
 // WithConsumeResetOffset sets the offset to start consuming from, or if
 // OffsetOutOfRange is seen while fetching, to restart consuming from.
 func WithConsumeResetOffset(offset kgo.Offset) ConsumerOption {
@@ -141,6 +160,15 @@ func WithConsumeResetOffset(offset kgo.Offset) ConsumerOption {
 func WithFetchIsolationLevel(level kgo.IsolationLevel) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		c.addClientOption(kgo.FetchIsolationLevel(level))
+	})
+}
+
+// WithConsumerShareAckCallback sets a callback for share group acknowledgement results.
+func WithConsumerShareAckCallback(fn func(*kgo.Client, kgo.ShareAckResults)) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if fn != nil {
+			c.addClientOption(kgo.ShareAckCallback(fn))
+		}
 	})
 }
 
@@ -209,6 +237,20 @@ type ConsumerConfig struct {
 	// from "dynamic" to "static".
 	InstanceID string `envconfig:"KAFKA_INSTANCE_ID"`
 
+	// ShareGroup switches Group from kgo.ConsumerGroup to kgo.ShareGroup.
+	ShareGroup string `envconfig:"KAFKA_SHARE_GROUP"`
+	// ShareMaxRecords sets max records for ShareFetch.
+	// If zero, franz-go default is used.
+	ShareMaxRecords int32 `envconfig:"KAFKA_SHARE_MAX_RECORDS"`
+	// ShareMaxRecordsStrict asks broker to strictly cap records per ShareFetch.
+	ShareMaxRecordsStrict bool `envconfig:"KAFKA_SHARE_MAX_RECORDS_STRICT"`
+	// ShareRejectAfterDeliveries controls when failed share group records are rejected.
+	// If zero, failed records are always released for redelivery.
+	ShareRejectAfterDeliveries int32 `envconfig:"KAFKA_SHARE_REJECT_AFTER_DELIVERIES"`
+	// ShareReleaseTimeout delays AckRelease after share handler errors.
+	// If zero, failed records are released immediately.
+	ShareReleaseTimeout time.Duration `envconfig:"KAFKA_SHARE_RELEASE_TIMEOUT"`
+
 	// PollInterval interval between handle batches.
 	PollInterval time.Duration `envconfig:"KAFKA_POLL_INTERVAL"`
 	// SuspendProcessingTimeout waiting timeout after batch processing failed (custom property).
@@ -241,9 +283,6 @@ type ConsumerConfig struct {
 	// HeartbeatInterval sets how long a group member goes between heartbeats to
 	// Kafka.
 	HeartbeatInterval time.Duration `envconfig:"KAFKA_HEARTBEAT_INTERVAL"`
-	// RequireStableFetchOffsets sets the group consumer to require "stable" fetch
-	// offsets before consuming from the group.
-	RequireStableFetchOffsets bool `envconfig:"KAFKA_REQUIRE_STABLE_FETCH_OFFS"`
 
 	// RequestTimeoutOverhead uses the given time as overhead while deadlining
 	// requests.
@@ -269,6 +308,12 @@ type ConsumerConfig struct {
 	MetadataMaxAge time.Duration `envconfig:"KAFKA_METADATA_MAX_AGE"`
 	// MetadataMinAge sets the minimum time between metadata queries.
 	MetadataMinAge time.Duration `envconfig:"KAFKA_METADATA_MIN_AGE"`
+	// AlwaysRetryEOF retries EOF errors instead of treating them as terminal connection failures.
+	AlwaysRetryEOF bool `envconfig:"KAFKA_ALWAYS_RETRY_EOF"`
+	// Rack identifies the client rack for rack-aware fetching and consumer assignment.
+	Rack string `envconfig:"KAFKA_RACK"`
+	//
+	MaxConcurrentFetches *int `envconfig:"KAFKA_MAX_CONCURRENT_FETCHES"`
 }
 
 func (cfg *ConsumerConfig) getLogin() string {
@@ -420,14 +465,6 @@ func withHeartbeatInterval(interval time.Duration) ConsumerOption {
 	})
 }
 
-func withRequireStableFetchOffsets(flag bool) ConsumerOption {
-	return consumerOptionFunc(func(c *Consumer) {
-		if flag {
-			c.addClientOption(kgo.RequireStableFetchOffsets())
-		}
-	})
-}
-
 func withConsumerRequestTimeoutOverhead(overhead time.Duration) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if overhead > 0 {
@@ -496,6 +533,71 @@ func withConsumerMetadataMinAge(age time.Duration) ConsumerOption {
 	return consumerOptionFunc(func(c *Consumer) {
 		if age > 0 {
 			c.addClientOption(kgo.MetadataMinAge(age))
+		}
+	})
+}
+
+func withConsumerAlwaysRetryEOF(enabled bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if enabled {
+			c.addClientOption(kgo.AlwaysRetryEOF())
+		}
+	})
+}
+
+func withConsumerRack(rack string) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if rack != "" {
+			c.addClientOption(kgo.Rack(rack))
+		}
+	})
+}
+
+func withConsumerMaxConcurrentFetches(n *int) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if n != nil {
+			c.addClientOption(kgo.MaxConcurrentFetches(*n))
+		}
+	})
+}
+
+func withConsumerShareGroup(group string) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if group != "" {
+			c.setMetricLabel("consumer_group", group)
+			c.addClientOption(kgo.ShareGroup(group))
+		}
+	})
+}
+
+func withShareMaxRecords(n int32) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if n > 0 {
+			c.addClientOption(kgo.ShareMaxRecords(n))
+		}
+	})
+}
+
+func withShareMaxRecordsStrict(strict bool) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if strict {
+			c.addClientOption(kgo.ShareMaxRecordsStrict())
+		}
+	})
+}
+
+func withShareRejectAfterDeliveries(n int32) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if n > 0 {
+			c.shareRejectAfterDeliveries = n
+		}
+	})
+}
+
+func withShareReleaseTimeout(timeout time.Duration) ConsumerOption {
+	return consumerOptionFunc(func(c *Consumer) {
+		if timeout > 0 {
+			c.shareReleaseTimeout = timeout
 		}
 	})
 }
