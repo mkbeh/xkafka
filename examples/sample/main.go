@@ -87,7 +87,7 @@ func main() {
 	var err error
 
 	producer, err = kafka.NewProducer(
-		kafka.WithProducerConfig(&kafka.ProducerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Brokers:             brokers,
 			DefaultProduceTopic: topic,
 		}),
@@ -99,7 +99,7 @@ func main() {
 	defer producer.Close(ctx)
 
 	consumer, err = kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Enabled: true,
 			Brokers: brokers,
 			Topics:  topic,

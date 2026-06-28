@@ -144,8 +144,16 @@ func main() {
 
 	var err error
 
-	txProducer, err = kafka.NewProducer(
-		kafka.WithProducerConfig(&kafka.ProducerConfig{
+	kafka.WithConfig(&kafka.Config{
+		Enabled:       true,
+		Brokers:       brokers,
+		Topics:        topic,
+		Group:         group,
+		ReadCommitted: true,
+	}),
+
+		txProducer, err = kafka.NewProducer(
+		kafka.WithConfig(&kafka.Config{
 			Brokers:             brokers,
 			DefaultProduceTopic: topic,
 			TransactionalID:     transactionalID,
@@ -158,7 +166,7 @@ func main() {
 	defer txProducer.Close(ctx)
 
 	consumer, err = kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Enabled: true,
 			Brokers: brokers,
 			Topics:  topic,

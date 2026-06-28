@@ -38,7 +38,7 @@ func NewProducer(opts ...ProducerOption) (*Producer, error) {
 	p.addTracerOption(kotel.TracerProvider(otel.GetTracerProvider()))
 
 	for _, opt := range opts {
-		opt.apply(p)
+		opt.applyProducer(p)
 	}
 
 	if p.promiseFunc == nil {

@@ -42,7 +42,7 @@ ctx := context.Background()
 
 // Initialize the Producer
 producer, err := kafka.NewProducer(
-	kafka.WithProducerConfig(&kafka.ProducerConfig{
+	kafka.WithConfig(&kafka.Config{
 		Brokers: "localhost:9092",
 	}),
 )
@@ -53,7 +53,7 @@ defer producer.Close(ctx) // Gracefully close the producer on exit
 
 // Initialize the Consumer
 consumer, err := kafka.NewConsumer(
-	kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+	kafka.WithConfig(&kafka.Config{
 		Enabled: true,
 		Brokers: "localhost:9092",
 		Topics:  "orders.created",
@@ -92,6 +92,7 @@ if err := producer.ProduceSync(ctx, &kgo.Record{
 ```
 <!-- @formatter:on -->
 
+> [!IMPORTANT]
 > Records are considered processed only when the handler returns `nil`.
 > If the handler returns an error, offsets are not committed and processing resumes after
 `KAFKA_SUSPEND_PROCESSING_TIMEOUT`.
@@ -103,8 +104,8 @@ To enable transactional publishing, configure `TransactionalID` and use `RunInTx
 <!-- @formatter:off -->
 
 ```go
-txProducer, err := kafka.NewProducer(
-    kafka.WithProducerConfig(&kafka.ProducerConfig{
+producer, err := kafka.NewProducer(
+    kafka.WithConfig(&kafka.Config{
         Brokers:         "localhost:9092",
         TransactionalID: "orders-tx-producer",
     }),
@@ -112,10 +113,10 @@ txProducer, err := kafka.NewProducer(
 if err != nil {
     log.Fatal(err)
 }
-defer txProducer.Close(context.Background())
+defer producer.Close(context.Background())
 
-if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
-    if err := txProducer.ProduceSync(ctx, &kgo.Record{
+if err := producer.RunInTx(ctx, func(ctx context.Context) error {
+    if err := producer.ProduceSync(ctx, &kgo.Record{
         Topic: "orders.created",
         Key:   []byte("order-1"),
         Value: []byte("created"),
@@ -123,7 +124,7 @@ if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
         return err
     }
 
-    if err := txProducer.ProduceSync(ctx, &kgo.Record{
+    if err := producer.ProduceSync(ctx, &kgo.Record{
         Topic: "audit.events",
         Key:   []byte("order-1"),
         Value: []byte("order created"),
@@ -139,9 +140,12 @@ if err := txProducer.RunInTx(ctx, func(ctx context.Context) error {
 
 <!-- @formatter:on -->
 
-`RunInTx` executes the function inside a Kafka transaction: it commits on `nil` and aborts on error or panic.
-
-Consumers that should not read aborted transactional records must use the `read_committed` isolation level.
+> [!NOTE]
+> **Automatic Lifecycle:** `RunInTx` executes your function inside a Kafka transaction — it commits automatically on
+`nil` and aborts on any returned error or panic.
+>
+> **Consumer Configuration:** Consumers that must ignore aborted transactional records should be configured with the
+`read_committed` isolation level.
 
 ## Observability
 
@@ -200,7 +204,7 @@ in [internal/pkg/kprom/metrics.go](internal/pkg/kprom/metrics.go).
 
 ## Configuration
 
-`ProducerConfig` and `ConsumerConfig` can be configured directly as Go structs.
+`Config` can be configured directly as Go structs.
 
 The structs also include `envconfig` tags, so you can populate them from environment variables using your preferred
 configuration layer.

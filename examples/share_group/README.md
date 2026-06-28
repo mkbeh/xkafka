@@ -1,4 +1,4 @@
-# Share Consumer Example
+# Share Group Example
 
 This example shows how to use `xkafka` with Kafka Share Groups.
 
@@ -66,7 +66,7 @@ go run main.go
 Or from the repository root:
 
 ```shell
-go run ./examples/share-consumer
+go run ./examples/share_group
 ```
 
 The HTTP server starts on:

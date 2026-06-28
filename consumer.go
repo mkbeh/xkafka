@@ -15,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-type fetchesHandler = func(ctx context.Context, fetches kgo.Fetches)
-
 type Consumer struct {
 	enabled bool
 	id      string
@@ -61,7 +59,7 @@ func NewConsumer(opts ...ConsumerOption) (*Consumer, error) {
 	c.addTracerOption(kotel.TracerProvider(otel.GetTracerProvider()))
 
 	for _, opt := range opts {
-		opt.apply(c)
+		opt.applyConsumer(c)
 	}
 
 	if c.handleFetches == nil {

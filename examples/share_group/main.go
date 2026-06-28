@@ -173,7 +173,7 @@ func main() {
 	var err error
 
 	producer, err = kafka.NewProducer(
-		kafka.WithProducerConfig(&kafka.ProducerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Brokers: brokers,
 		}),
 		kafka.WithProducerClientID("share-producer"),
@@ -247,7 +247,7 @@ func newShareConsumer(index int) (*kafka.Consumer, error) {
 	clientID := fmt.Sprintf("sample-share-client-%d", index)
 
 	return kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Enabled: true,
 			Brokers: brokers,
 			Topics:  shareTopic,
@@ -289,7 +289,7 @@ func newShareBatchConsumer(index int) (*kafka.Consumer, error) {
 	clientID := fmt.Sprintf("sample-share-batch-client-%d", index)
 
 	return kafka.NewConsumer(
-		kafka.WithConsumerConfig(&kafka.ConsumerConfig{
+		kafka.WithConfig(&kafka.Config{
 			Enabled: true,
 			Brokers: brokers,
 			Topics:  shareBatchTopic,
