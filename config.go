@@ -331,13 +331,9 @@ func WithLogger(logger *slog.Logger) Opt {
 
 func WithClientID(s string) Opt {
 	return clientOpt{fn: func(c *client) {
-		if s == "" {
-			return
+		if s != "" {
+			c.clientID = s
 		}
-
-		c.clientID = s
-		c.clientOps = append(c.clientOps, kgo.ClientID(s))
-		c.tracerOpts = append(c.tracerOpts, kotel.ClientID(s))
 	}}
 }
 
