@@ -2,8 +2,7 @@
 
 # xkafka
 
-**Lightweight Kafka wrapper for Go, built on top of [franz-go](https://github.com/twmb/franz-go) with OpenTelemetry and
-Prometheus support.**
+**Lightweight Kafka wrapper for Go, built on top of [franz-go](https://github.com/twmb/franz-go) with built-in observability.**
 
 ![Go Version](https://img.shields.io/badge/go-1.26%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
