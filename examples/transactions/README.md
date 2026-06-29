@@ -20,15 +20,6 @@ KAFKA_BROKERS=localhost:29092
 KAFKA_TX_TOPIC=sample-tx-topic
 KAFKA_TX_GROUP=sample-tx-group
 KAFKA_TRANSACTIONAL_ID=sample-tx-producer
-````
-
-Example:
-
-```shell
-export KAFKA_BROKERS=localhost:29092
-export KAFKA_TX_TOPIC=sample-tx-topic
-export KAFKA_TX_GROUP=sample-tx-group
-export KAFKA_TRANSACTIONAL_ID=sample-tx-producer
 ```
 
 ## Run
@@ -139,15 +130,14 @@ Prometheus metrics are available at:
 curl 'http://localhost:8080/metrics'
 ```
 
-Useful metrics for this example:
+Useful metrics for this example include:
 
 ```text
-kafka_produce_records_total
 kafka_produce_errors_total
 kafka_transactions_total
 kafka_transaction_duration_seconds
 kafka_consume_handle_duration_seconds
-kafka_fetch_records_total
+kafka_consume_errors_total
 ```
 
 Transaction outcomes:
