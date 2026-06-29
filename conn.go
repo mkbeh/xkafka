@@ -95,6 +95,8 @@ func newClient(opts ...Opt) (*client, error) {
 		opt.apply(c)
 	}
 
+	c.applyClientID()
+
 	formatter, err := newFormatter()
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
@@ -105,7 +107,6 @@ func newClient(opts ...Opt) (*client, error) {
 		kotel.WithTracer(kotel.NewTracer(c.tracerOpts...)),
 	)
 
-	c.exposeMetrics()
 	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
 
 	c.fmt = formatter
@@ -246,19 +247,14 @@ func (c *client) setMetricLabel(key, value string) {
 	c.labels[key] = value
 }
 
-func (c *client) exposeMetrics() {
-	if c.labels == nil {
-		c.labels = make(map[string]string)
-	}
-
-	c.labels["client_id"] = c.getClientID()
-}
-
-func (c *client) getClientID() string {
+func (c *client) applyClientID() {
 	if c.clientID == "" {
 		c.clientID = uuid.New().String()
 	}
-	return c.clientID
+
+	c.clientOps = append(c.clientOps, kgo.ClientID(c.clientID))
+	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.clientID))
+	c.setMetricLabel("client_id", c.clientID)
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {
