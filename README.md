@@ -184,11 +184,13 @@ if err := client.HandleFetches(ctx); err != nil {
 <!-- @formatter:on -->
 
 > [!NOTE]
-> **Share Group Acknowledgment Logic**
+> **Share Group Ack Rules**
 >
-> * `handler success` -> `AckAccept`
-> * `handler error` -> `AckRelease`
-> * `delivery limit` -> `AckReject` if `ShareRejectAfterDeliveries > 0`; otherwise records keep being released with
+> `handler success` - `AckAccept`
+> 
+> `handler error` - `AckRelease`
+> 
+> `delivery limit` - `AckReject` if `ShareRejectAfterDeliveries > 0`; otherwise records keep being released with
     `AckRelease`
 
 ## Exactly-Once Semantics
