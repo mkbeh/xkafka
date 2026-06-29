@@ -16,14 +16,6 @@ Configure Kafka connection using environment variables:
 KAFKA_BROKERS=localhost:29092
 KAFKA_TOPICS=sample-topic
 KAFKA_GROUP=sample-group
-````
-
-Example:
-
-```shell
-export KAFKA_BROKERS=localhost:29092
-export KAFKA_TOPICS=sample-topic
-export KAFKA_GROUP=sample-group
 ```
 
 ## Run
@@ -86,6 +78,32 @@ message is later visible to the consumer if Kafka publishing succeeds
 
 Async publishing errors are logged by the producer callback.
 
+## Produce panic record
+
+Sends one record that intentionally panics in the consumer handler.
+
+```shell
+curl -X POST 'localhost:8080/panic'
+```
+
+Expected result:
+
+```text
+HTTP 202
+the consumer handler panics, the panic is recovered, and offsets are not committed
+```
+
+Example log:
+
+```text
+ERROR error handling records error="kafka: batch handler panic: forced consumer handler panic"
+```
+
+The same record may be redelivered because offsets are not committed when the handler panics.
+
+In a real system, poison records should eventually be handled with retry limits, a dead-letter topic, or another
+recovery policy.
+
 ## Metrics
 
 Prometheus metrics are available at:
@@ -97,14 +115,12 @@ curl 'http://localhost:8080/metrics'
 Useful metrics for this example:
 
 ```text
-kafka_produce_records_total
 kafka_produce_errors_total
 kafka_consume_handle_duration_seconds
 kafka_consume_errors_total
-kafka_fetch_records_total
 ```
 
-Check produced records:
+Check produce errors:
 
 ```shell
 curl -s 'http://localhost:8080/metrics' | grep 'kafka_produce_records_total'

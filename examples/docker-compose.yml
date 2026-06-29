@@ -70,9 +70,9 @@ services:
           "sample-topic"
           "sample-tx-topic"
           "sample-share-topic"
-          "sample-share-batch-topic"
           "sample-eos-input-topic"
           "sample-eos-output-topic"
+          "sample-env-topic"
         )
         
         echo "init-kafka started"

@@ -12,6 +12,10 @@ type KgoAdapter struct {
 }
 
 func NewKgoAdapter(sl *slog.Logger) *KgoAdapter {
+	if sl == nil {
+		sl = slog.Default()
+	}
+
 	return &KgoAdapter{sl}
 }
 
@@ -58,13 +62,26 @@ func kgoToSlogLevel(level kgo.LogLevel) slog.Level {
 // Constants and constructors to standardize the keys used in logs.
 
 const (
-	// errorKey - to pass error to log.
-	errorKey string = "error"
-	// componentKey - to identify the component that is logging (e.g.: "kafka-consumer")
+	// errorKey is used to pass an error to logs.
+	errorKey = "error"
+
+	// componentKey identifies the component that is logging.
 	componentKey = "component"
+
+	// recordKey is used to pass a single formatted Kafka record.
+	recordKey = "record"
+
+	// recordsKey is used to pass formatted Kafka records.
+	recordsKey = "records"
+
+	// countKey is used to pass item counts.
+	countKey = "count"
+
+	// consumerLabelsKey is used to pass Kafka consumer labels.
+	consumerLabelsKey = "consumer_labels"
 )
 
-// Error for passing error to log.
+// Error returns an error log attribute.
 func Error(err error) slog.Attr { return slog.Any(errorKey, err) }
 
 // Component to identify the component that is logging (e.g.: "kafka-consumer").
@@ -74,13 +91,13 @@ func Error(err error) slog.Attr { return slog.Any(errorKey, err) }
 func Component(component string) slog.Attr { return slog.String(componentKey, component) }
 
 // Record transforms an []byte into a slog.Attr.
-func Record(record []byte) slog.Attr { return slog.String("record", string(record)) }
+func Record(record []byte) slog.Attr { return slog.String(recordKey, string(record)) }
 
 // Records transforms a []byte into a slog.Attr.
-func Records(records []byte) slog.Attr { return slog.String("records", string(records)) }
+func Records(records []byte) slog.Attr { return slog.String(recordsKey, string(records)) }
 
 // Count transforms an int into a slog.Attr.
-func Count(count int) slog.Attr { return slog.Int("count", count) }
+func Count(count int) slog.Attr { return slog.Int(countKey, count) }
 
 // ConsumerLabels transforms a map[string]string into slog.Attr.
 func ConsumerLabels(labels map[string]string) slog.Attr {
@@ -89,7 +106,7 @@ func ConsumerLabels(labels map[string]string) slog.Attr {
 		attrs = append(attrs, slog.String(k, v))
 	}
 	return slog.Attr{
-		Key:   "consumer_labels",
+		Key:   consumerLabelsKey,
 		Value: slog.GroupValue(attrs...),
 	}
 }

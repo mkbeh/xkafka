@@ -8,14 +8,12 @@ const (
 	topicLabel   = "topic"
 	groupLabel   = "consumer_group"
 	clientLabel  = "client_id"
-	kindLabel    = "client_kind"
 	outcomeLabel = "outcome"
 )
 
 func baseConstLabels(labels prometheus.Labels) prometheus.Labels {
 	return prometheus.Labels{
 		clientLabel: labels[clientLabel],
-		kindLabel:   labels[kindLabel],
 	}
 }
 

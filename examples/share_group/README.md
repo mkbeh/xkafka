@@ -4,13 +4,12 @@ This example shows how to use `xkafka` with Kafka Share Groups.
 
 **This example demonstrates:**
 
-* single-record share consumer handler;
-* batch share consumer handler;
+* share group consumption with the batch handler API;
+* batch size control through `MaxPollRecords` and `ShareMaxRecords`;
 * `AckAccept` on successful handling;
 * `AckRelease` on handler errors;
 * `AckReject` after delivery count limit;
 * release timeout before redelivery;
-* multiple share consumers processing records from the same topic;
 * Prometheus metrics.
 
 ## Configuration
@@ -24,36 +23,14 @@ KAFKA_SHARE_TOPIC=sample-share-topic
 KAFKA_SHARE_GROUP=sample-share-group
 KAFKA_SHARE_CONSUMERS=4
 KAFKA_SHARE_MESSAGES=30
-
-KAFKA_SHARE_BATCH_TOPIC=sample-share-batch-topic
-KAFKA_SHARE_BATCH_GROUP=sample-share-batch-group
-KAFKA_SHARE_BATCH_CONSUMERS=2
-KAFKA_SHARE_BATCH_MESSAGES=30
-KAFKA_SHARE_BATCH_MAX_RECORDS=5
+KAFKA_SHARE_MAX_RECORDS=5
 
 KAFKA_SHARE_REJECT_AFTER_DELIVERIES=3
-KAFKA_SHARE_RELEASE_TIMEOUT=5s
-````
-
-Example:
-
-```shell
-export KAFKA_BROKERS=localhost:29092
-
-export KAFKA_SHARE_TOPIC=sample-share-topic
-export KAFKA_SHARE_GROUP=sample-share-group
-export KAFKA_SHARE_CONSUMERS=4
-export KAFKA_SHARE_MESSAGES=30
-
-export KAFKA_SHARE_BATCH_TOPIC=sample-share-batch-topic
-export KAFKA_SHARE_BATCH_GROUP=sample-share-batch-group
-export KAFKA_SHARE_BATCH_CONSUMERS=2
-export KAFKA_SHARE_BATCH_MESSAGES=30
-export KAFKA_SHARE_BATCH_MAX_RECORDS=5
-
-export KAFKA_SHARE_REJECT_AFTER_DELIVERIES=3
-export KAFKA_SHARE_RELEASE_TIMEOUT=5s
+KAFKA_SHARE_RELEASE_TIMEOUT=2s
 ```
+
+`KAFKA_SHARE_MAX_RECORDS` controls the batch size. Set it to `1` to get single-record style processing through the same
+batch handler API.
 
 ## Run
 
@@ -94,13 +71,15 @@ HTTP 202
 messages are visible to share consumers
 ```
 
-The endpoint publishes `KAFKA_SHARE_MESSAGES` records starting from the provided `id`.
-
 Example log:
 
 ```text
-share consume: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=60, delivery_count=1, msg={ID:700}
-share consume: client_id=sample-share-client-2, topic=sample-share-topic, partition=0, offset=44, delivery_count=1, msg={ID:701}
+share consume: client_id=sample-share-client-1, records=5
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=60, delivery_count=1, msg={ID:700}
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=0, offset=44, delivery_count=1, msg={ID:701}
+
+share consume: client_id=sample-share-client-2, records=5
+  record: client_id=sample-share-client-2, topic=sample-share-topic, partition=1, offset=12, delivery_count=1, msg={ID:705}
 ```
 
 Successful records are acknowledged with `AckAccept`.
@@ -125,50 +104,49 @@ the same record is redelivered until delivery count reaches the reject limit
 Expected log pattern:
 
 ```text
-share consume: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=23, delivery_count=1, msg={ID:888}
-ERROR error handling share group record error="forced share handler error" ack_status=release
-
-share consume: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=23, delivery_count=2, msg={ID:888}
-ERROR error handling share group record error="forced share handler error" ack_status=release
-
-share consume: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=23, delivery_count=3, msg={ID:888}
-ERROR error handling share group record error="forced share handler error" ack_status=reject
+share consume: client_id=sample-share-client-1, records=1
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=23, delivery_count=1, msg={ID:888}
+ERROR error handling share group records error="forced share handler error"
 ```
 
-## Produce to ShareGroup batch topic
+## Produce panic Share Group message
 
-Sends messages to a separate topic consumed by share batch consumers.
+Sends one message with `id=444`.
+
+The share handler intentionally panics for this message.
 
 ```shell
-curl -X POST 'localhost:8080/share-batch' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "id": 800
-  }'
+curl -X POST 'localhost:8080/share-panic'
 ```
 
 Expected result:
 
 ```text
 HTTP 202
-messages are visible to share batch consumers
+the panic is recovered and the record is handled through the share error ack flow
 ```
 
-The endpoint publishes `KAFKA_SHARE_BATCH_MESSAGES` records starting from the provided `id`.
-
-Example log:
+Expected log pattern:
 
 ```text
-share batch consume: client_id=sample-share-batch-client-2, records=11
-  record: client_id=sample-share-batch-client-2, topic=sample-share-batch-topic, partition=0, offset=0, delivery_count=1, msg={ID:802}
+share consume: client_id=sample-share-client-1, records=1
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=1, msg={ID:444}
+ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=release
+
+share consume: client_id=sample-share-client-1, records=1
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=2, msg={ID:444}
+ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=release
+
+share consume: client_id=sample-share-client-1, records=1
+  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=3, msg={ID:444}
+ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=reject
 ```
 
-The batch handler uses all-or-nothing acknowledgement semantics:
+The panicking record is released for redelivery until the delivery count reaches the reject limit.
 
-```text
-batch handler success -> AckAccept for all records in the batch
-batch handler error   -> AckRelease or AckReject for all records in the batch
-```
+In a real system, poison records should eventually be handled with retry limits, a dead-letter topic, or another
+recovery policy.
+
 
 ## Metrics
 

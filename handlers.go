@@ -1,4 +1,4 @@
-package kafka
+package xkafka
 
 import (
 	"context"
@@ -7,11 +7,15 @@ import (
 )
 
 type (
-	TxFunc                        func(ctx context.Context) error
-	HandlerFunc                   func(ctx context.Context, record *kgo.Record) error
-	BatchHandlerFunc              func(ctx context.Context, records []*kgo.Record) error
-	BatchGroupTransactSessionFunc func(ctx context.Context, records []*kgo.Record, session *GroupTransactSession) error
-)
+	// TxFunc handles work inside a Kafka transaction.
+	TxFunc func(ctx context.Context) error
 
-// fetchesHandler is an internal adapter used by consumer runtimes.
-type fetchesHandler = func(ctx context.Context, fetches kgo.Fetches)
+	// ProducePromiseFunc is called when producing a record completes.
+	ProducePromiseFunc func(record *kgo.Record, err error)
+
+	// BatchHandlerFunc handles a batch of consumed Kafka records.
+	BatchHandlerFunc func(ctx context.Context, records []*kgo.Record) error
+
+	// BatchTxHandlerFunc handles a batch of consumed Kafka records inside a group transaction.
+	BatchTxHandlerFunc func(ctx context.Context, records []*kgo.Record, session *GroupTransactSession) error
+)

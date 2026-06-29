@@ -29,7 +29,6 @@
 //
 // Const labels:
 //   - client_id=#{client_id}
-//   - client_kind=#{consumer|producer}
 
 package kprom
 

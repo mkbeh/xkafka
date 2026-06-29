@@ -10,6 +10,7 @@ This example shows Kafka-to-Kafka exactly-once processing with `GroupTransactSes
 * committing produced records and consumed offsets atomically;
 * consuming output records with `ReadCommitted`;
 * aborting a transaction when the handler returns an error;
+* aborting a transaction when the handler panics;
 * Prometheus metrics.
 
 ## Configuration
@@ -25,19 +26,6 @@ KAFKA_EOS_GROUP=sample-eos-group
 KAFKA_EOS_OUTPUT_GROUP=sample-eos-output-group
 KAFKA_EOS_TRANSACTIONAL_ID=sample-eos-session
 KAFKA_EOS_MESSAGES=10
-```
-
-Example:
-
-```shell
-export KAFKA_BROKERS=localhost:29092
-
-export KAFKA_EOS_INPUT_TOPIC=sample-eos-input-topic
-export KAFKA_EOS_OUTPUT_TOPIC=sample-eos-output-topic
-export KAFKA_EOS_GROUP=sample-eos-group
-export KAFKA_EOS_OUTPUT_GROUP=sample-eos-output-group
-export KAFKA_EOS_TRANSACTIONAL_ID=sample-eos-session
-export KAFKA_EOS_MESSAGES=10
 ```
 
 ## Run
@@ -88,9 +76,13 @@ output consume: topic=sample-eos-output-topic, partition=0, offset=0, msg={ID:10
 output consume: topic=sample-eos-output-topic, partition=0, offset=1, msg={ID:101 Source:sample-eos-input-topic Processed:true}
 ```
 
-## Produce failing input record
+## Produce failing input records
 
-Sends one record that intentionally fails in the group transact session handler.
+Sends two input records: one valid record followed by one poison record.
+
+The handler produces an output record for the valid input record first, then returns an error on the poison record.
+The group transaction is aborted, so produced output records are not committed and remain invisible to `ReadCommitted`
+consumers.
 
 ```shell
 curl -X POST 'localhost:8080/group-tx-error'
@@ -103,10 +95,41 @@ HTTP 202
 the group transaction is aborted and output records are not committed
 ```
 
-The failing input record may be redelivered because consumed offsets are not committed when the transaction aborts.
+Example log:
+
+```text
+group tx consume batch: records=2
+ERROR error handling records in group transaction error="forced group transaction handler error"
+```
+
+The same input records may be redelivered because consumed offsets are not committed when the transaction aborts.
 
 In a real system, poison records should eventually be handled with retry limits, a dead-letter topic, or another
 recovery policy.
+
+## Produce panic input record
+
+Sends one input record that intentionally panics in the group transact session handler.
+
+```shell
+curl -X POST 'localhost:8080/group-tx-panic'
+```
+
+Expected result:
+
+```text
+HTTP 202
+the group transaction is aborted and the consumed offset is not committed
+```
+
+Example log:
+
+```text
+group tx consume batch: records=1
+ERROR error handling records in group transaction error="kafka: batch handler panic: forced group transaction handler panic"
+```
+
+The same input record may be redelivered because consumed offsets are not committed when the transaction aborts.
 
 ## Metrics
 

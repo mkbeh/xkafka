@@ -152,6 +152,7 @@ linters:
       - third_party/
       - builtin/
       - examples/
+      - tmp/
 
 issues:
   max-same-issues: 0
@@ -169,3 +170,4 @@ formatters:
       - third_party/
       - builtin/
       - examples/
+      - tmp/

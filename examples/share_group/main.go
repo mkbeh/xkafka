@@ -10,64 +10,50 @@ import (
 	"strconv"
 	"time"
 
-	kafka "github.com/mkbeh/xkafka"
+	"github.com/mkbeh/xkafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 const (
-	defaultShareMessagesCount          = 30
-	defaultShareBatchMessagesCount     = 30
-	defaultShareConsumersCount         = 4
-	defaultShareBatchConsumersCount    = 2
-	defaultShareBatchMaxRecords        = 5
-	defaultShareRejectAfterDeliveries  = 3
-	defaultShareReleaseTimeout         = 5 * time.Second
-	defaultShareHandlerProcessingDelay = 500 * time.Millisecond
-	defaultBatchHandlerProcessingDelay = 2 * time.Second
+	defaultMessagesCount          = 30
+	defaultConsumersCount         = 4
+	defaultMaxRecords             = 5
+	defaultRejectAfterDeliveries  = 3
+	defaultReleaseTimeout         = 5 * time.Second
+	defaultHandlerProcessingDelay = 500 * time.Millisecond
 )
 
 var (
-	producer            *kafka.Producer
-	shareConsumers      []*kafka.Consumer
-	shareBatchConsumers []*kafka.Consumer
+	producer  *xkafka.Client
+	consumers []*xkafka.Client
 )
 
 var (
 	brokers string
 
-	shareTopic                 string
-	shareGroup                 string
-	shareConsumersCount        int
-	shareMessagesCount         int
-	shareReleaseTimeout        time.Duration
-	shareRejectAfterDeliveries int32
-
-	shareBatchTopic          string
-	shareBatchGroup          string
-	shareBatchConsumersCount int
-	shareBatchMessagesCount  int
-	shareBatchMaxRecords     int32
+	topic                 string
+	group                 string
+	consumersCount        int
+	messagesCount         int
+	maxRecords            int32
+	releaseTimeout        time.Duration
+	rejectAfterDeliveries int32
 )
 
 func init() {
 	brokers = os.Getenv("KAFKA_BROKERS")
 
-	shareTopic = getenv("KAFKA_SHARE_TOPIC", "sample-share-topic")
-	shareGroup = getenv("KAFKA_SHARE_GROUP", "sample-share-group")
-	shareConsumersCount = int(getenvInt32("KAFKA_SHARE_CONSUMERS", defaultShareConsumersCount))
-	shareMessagesCount = int(getenvInt32("KAFKA_SHARE_MESSAGES", defaultShareMessagesCount))
+	topic = getenv("KAFKA_SHARE_TOPIC", "sample-share-topic")
+	group = getenv("KAFKA_SHARE_GROUP", "sample-share-group")
+	consumersCount = int(getenvInt32("KAFKA_SHARE_CONSUMERS", defaultConsumersCount))
+	messagesCount = int(getenvInt32("KAFKA_SHARE_MESSAGES", defaultMessagesCount))
+	maxRecords = getenvInt32("KAFKA_SHARE_MAX_RECORDS", defaultMaxRecords)
 
-	shareBatchTopic = getenv("KAFKA_SHARE_BATCH_TOPIC", "sample-share-batch-topic")
-	shareBatchGroup = getenv("KAFKA_SHARE_BATCH_GROUP", "sample-share-batch-group")
-	shareBatchConsumersCount = int(getenvInt32("KAFKA_SHARE_BATCH_CONSUMERS", defaultShareBatchConsumersCount))
-	shareBatchMessagesCount = int(getenvInt32("KAFKA_SHARE_BATCH_MESSAGES", defaultShareBatchMessagesCount))
-	shareBatchMaxRecords = getenvInt32("KAFKA_SHARE_BATCH_MAX_RECORDS", defaultShareBatchMaxRecords)
-
-	shareReleaseTimeout = getenvDuration("KAFKA_SHARE_RELEASE_TIMEOUT", defaultShareReleaseTimeout)
-	shareRejectAfterDeliveries = getenvInt32(
+	releaseTimeout = getenvDuration("KAFKA_SHARE_RELEASE_TIMEOUT", defaultReleaseTimeout)
+	rejectAfterDeliveries = getenvInt32(
 		"KAFKA_SHARE_REJECT_AFTER_DELIVERIES",
-		defaultShareRejectAfterDeliveries,
+		defaultRejectAfterDeliveries,
 	)
 }
 
@@ -75,7 +61,7 @@ type Message struct {
 	ID int `json:"id"`
 }
 
-func produceShareHandler(w http.ResponseWriter, r *http.Request) {
+func produceHandler(w http.ResponseWriter, r *http.Request) {
 	var msg Message
 
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
@@ -83,64 +69,9 @@ func produceShareHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for i := 0; i < shareMessagesCount; i++ {
-		message := Message{
-			ID: msg.ID + i,
-		}
+	records := make([]*kgo.Record, 0, messagesCount)
 
-		payload, err := json.Marshal(&message)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if err := producer.ProduceSync(r.Context(), &kgo.Record{
-			Topic: shareTopic,
-			Key:   kafka.ConvertAnyToBytes(message.ID),
-			Value: payload,
-		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintf(w, "published %d share messages\n", shareMessagesCount)
-}
-
-func produceShareErrorHandler(w http.ResponseWriter, r *http.Request) {
-	msg := Message{ID: 888}
-
-	payload, err := json.Marshal(&msg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := producer.ProduceSync(r.Context(), &kgo.Record{
-		Topic: shareTopic,
-		Key:   kafka.ConvertAnyToBytes(msg.ID),
-		Value: payload,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "share error message published")
-}
-
-func produceShareBatchHandler(w http.ResponseWriter, r *http.Request) {
-	var msg Message
-
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	records := make([]*kgo.Record, 0, shareBatchMessagesCount)
-
-	for i := 0; i < shareBatchMessagesCount; i++ {
+	for i := 0; i < messagesCount; i++ {
 		message := Message{
 			ID: msg.ID + i,
 		}
@@ -152,8 +83,8 @@ func produceShareBatchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		records = append(records, &kgo.Record{
-			Topic: shareBatchTopic,
-			Key:   kafka.ConvertAnyToBytes(message.ID),
+			Topic: topic,
+			Key:   []byte(strconv.Itoa(message.ID)),
 			Value: payload,
 		})
 	}
@@ -164,7 +95,51 @@ func produceShareBatchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintf(w, "published %d share batch messages\n", len(records))
+	_, _ = fmt.Fprintf(w, "published %d share messages\n", len(records))
+}
+
+func produceErrorHandler(w http.ResponseWriter, r *http.Request) {
+	msg := Message{ID: 888}
+
+	payload, err := json.Marshal(&msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := producer.ProduceSync(r.Context(), &kgo.Record{
+		Topic: topic,
+		Key:   []byte(strconv.Itoa(msg.ID)),
+		Value: payload,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = fmt.Fprintln(w, "share error message published")
+}
+
+func producePanicHandler(w http.ResponseWriter, r *http.Request) {
+	msg := Message{ID: 444}
+
+	payload, err := json.Marshal(&msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := producer.ProduceSync(r.Context(), &kgo.Record{
+		Topic: topic,
+		Key:   []byte(strconv.Itoa(msg.ID)),
+		Value: payload,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = fmt.Fprintln(w, "share panic message published")
 }
 
 func main() {
@@ -172,70 +147,43 @@ func main() {
 
 	var err error
 
-	producer, err = kafka.NewProducer(
-		kafka.WithConfig(&kafka.Config{
+	producer, err = xkafka.NewClient(
+		xkafka.WithConfig(&xkafka.Config{
 			Brokers: brokers,
 		}),
-		kafka.WithProducerClientID("share-producer"),
+		xkafka.WithClientID("share-producer"),
 	)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer producer.Close(ctx)
+	defer producer.Shutdown(ctx)
 
-	for i := 1; i <= shareConsumersCount; i++ {
-		shareConsumer, err := newShareConsumer(i)
+	for i := 1; i <= consumersCount; i++ {
+		consumer, err := newConsumer(i)
 		if err != nil {
 			log.Fatalln(err)
 		}
 
-		if err := shareConsumer.PreRun(ctx); err != nil {
-			log.Fatalln(err)
-		}
-
 		go func() {
-			if err := shareConsumer.Run(ctx); err != nil {
+			if err := consumer.HandleFetches(ctx); err != nil {
 				log.Fatalln(err)
 			}
 		}()
 
-		shareConsumers = append(shareConsumers, shareConsumer)
+		consumers = append(consumers, consumer)
 	}
 
 	defer func() {
-		for _, shareConsumer := range shareConsumers {
-			shareConsumer.Shutdown(ctx)
-		}
-	}()
-
-	for i := 1; i <= shareBatchConsumersCount; i++ {
-		shareBatchConsumer, err := newShareBatchConsumer(i)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		if err := shareBatchConsumer.PreRun(ctx); err != nil {
-			log.Fatalln(err)
-		}
-
-		go func() {
-			if err := shareBatchConsumer.Run(ctx); err != nil {
-				log.Fatalln(err)
+		for _, consumer := range consumers {
+			if err := consumer.Shutdown(ctx); err != nil {
+				log.Println(err)
 			}
-		}()
-
-		shareBatchConsumers = append(shareBatchConsumers, shareBatchConsumer)
-	}
-
-	defer func() {
-		for _, shareBatchConsumer := range shareBatchConsumers {
-			shareBatchConsumer.Shutdown(ctx)
 		}
 	}()
 
-	http.HandleFunc("/share", produceShareHandler)
-	http.HandleFunc("/share-error", produceShareErrorHandler)
-	http.HandleFunc("/share-batch", produceShareBatchHandler)
+	http.HandleFunc("/share", produceHandler)
+	http.HandleFunc("/share-error", produceErrorHandler)
+	http.HandleFunc("/share-panic", producePanicHandler)
 	http.Handle("/metrics", promhttp.Handler())
 
 	if err := http.ListenAndServe("localhost:8080", nil); err != nil {
@@ -243,72 +191,27 @@ func main() {
 	}
 }
 
-func newShareConsumer(index int) (*kafka.Consumer, error) {
+func newConsumer(index int) (*xkafka.Client, error) {
 	clientID := fmt.Sprintf("sample-share-client-%d", index)
 
-	return kafka.NewConsumer(
-		kafka.WithConfig(&kafka.Config{
+	return xkafka.NewClient(
+		xkafka.WithConfig(&xkafka.Config{
 			Enabled: true,
 			Brokers: brokers,
-			Topics:  shareTopic,
+			Topics:  topic,
 
-			ShareGroup: shareGroup,
+			MaxPollRecords:  int(maxRecords),
+			ShareGroup:      group,
+			ShareMaxRecords: maxRecords,
 
-			ShareReleaseTimeout:        shareReleaseTimeout,
-			ShareRejectAfterDeliveries: shareRejectAfterDeliveries,
+			ShareReleaseTimeout:        releaseTimeout,
+			ShareRejectAfterDeliveries: rejectAfterDeliveries,
 		}),
-		kafka.WithConsumerClientID(clientID),
-		kafka.WithConsumerShareHandler(func(_ context.Context, record *kgo.Record) error {
-			var msg Message
-			if err := json.Unmarshal(record.Value, &msg); err != nil {
-				return err
-			}
+		xkafka.WithClientID(clientID),
+		xkafka.WithConsumerShareBatchHandler(func(_ context.Context, records []*kgo.Record) error {
+			fmt.Printf("share consume: client_id=%s, records=%d\n", clientID, len(records))
 
-			time.Sleep(defaultShareHandlerProcessingDelay)
-
-			fmt.Printf(
-				"share consume: client_id=%s, topic=%s, partition=%d, offset=%d, delivery_count=%d, msg=%+v\n",
-				clientID,
-				record.Topic,
-				record.Partition,
-				record.Offset,
-				record.DeliveryCount(),
-				msg,
-			)
-
-			if msg.ID == 888 {
-				return fmt.Errorf("forced share handler error")
-			}
-
-			return nil
-		}),
-	)
-}
-
-func newShareBatchConsumer(index int) (*kafka.Consumer, error) {
-	clientID := fmt.Sprintf("sample-share-batch-client-%d", index)
-
-	return kafka.NewConsumer(
-		kafka.WithConfig(&kafka.Config{
-			Enabled: true,
-			Brokers: brokers,
-			Topics:  shareBatchTopic,
-
-			ShareGroup: shareBatchGroup,
-
-			ShareMaxRecords:            shareBatchMaxRecords,
-			ShareRejectAfterDeliveries: shareRejectAfterDeliveries,
-			ShareReleaseTimeout:        shareReleaseTimeout,
-		}),
-		kafka.WithConsumerClientID(clientID),
-		kafka.WithConsumerShareBatchHandler(func(_ context.Context, records []*kgo.Record) error {
-			fmt.Printf(
-				"share batch consume: client_id=%s, records=%d\n",
-				clientID,
-				len(records),
-			)
-
-			time.Sleep(defaultBatchHandlerProcessingDelay)
+			time.Sleep(defaultHandlerProcessingDelay)
 
 			for _, record := range records {
 				var msg Message
@@ -325,6 +228,14 @@ func newShareBatchConsumer(index int) (*kafka.Consumer, error) {
 					record.DeliveryCount(),
 					msg,
 				)
+
+				if msg.ID == 888 {
+					return fmt.Errorf("forced share handler error")
+				}
+
+				if msg.ID == 444 {
+					panic("forced share handler panic")
+				}
 			}
 
 			return nil
