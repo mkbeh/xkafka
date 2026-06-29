@@ -3,7 +3,7 @@ module eos
 go 1.26
 
 require (
-	github.com/mkbeh/xkafka v0.1.14
+	github.com/mkbeh/xkafka v0.3.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.21.4
 )
@@ -19,9 +19,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.69.0 // indirect
-	github.com/prometheus/procfs v0.20.1 // indirect
+	github.com/prometheus/procfs v0.21.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
-	github.com/twmb/franz-go/plugin/kotel v1.6.0 // indirect
+	github.com/twmb/franz-go/plugin/kotel v1.7.0 // indirect
+	github.com/twmb/franz-go/plugin/kprom v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
