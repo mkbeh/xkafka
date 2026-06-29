@@ -3,7 +3,7 @@ module share_groups
 go 1.26
 
 require (
-	github.com/mkbeh/xkafka v0.3.0
+	github.com/mkbeh/xkafka v0.3.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.21.4
 )
