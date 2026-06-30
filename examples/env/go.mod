@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1
-	github.com/mkbeh/xkafka v0.3.2
+	github.com/mkbeh/xkafka v0.4.0
 	github.com/twmb/franz-go v1.21.4
 )
 
