@@ -287,61 +287,57 @@ See [examples/env](examples/env).
 
 ### Environment variables
 
-| Variable                            | Default | Description                                                               |
-|:------------------------------------|:-------:|:--------------------------------------------------------------------------|
-| **Common**                          |         |                                                                           |
-| `KAFKA_BROKERS`                     |    —    | Comma-separated seed brokers                                              |
-| `KAFKA_SASL_MECHANISM`              |    —    | `PLAIN`, `SCRAM-SHA-256`, or `SCRAM-SHA-512`                              |
-| `KAFKA_USER`                        |    —    | SASL authentication username                                              |
-| `KAFKA_PASSWORD`                    |    —    | SASL authentication password                                              |
-| `KAFKA_REQUEST_TIMEOUT_OVERHEAD`    |    —    | Extra time added while setting request deadlines                          |
-| `KAFKA_REQUEST_RETRIES`             |    —    | Maximum number of request retries                                         |
-| `KAFKA_RETRY_TIMEOUT`               |    —    | Total retry time limit for requests                                       |
-| `KAFKA_DIAL_TIMEOUT`                |    —    | Broker dial timeout                                                       |
-| `KAFKA_CONN_IDLE_TIMEOUT`           |    —    | Idle connection timeout                                                   |
-| `KAFKA_METADATA_MAX_AGE`            |    —    | Maximum age of cached metadata                                            |
-| `KAFKA_METADATA_MIN_AGE`            |    —    | Minimum time between metadata refreshes                                   |
-| `KAFKA_MAX_WRITE_BYTES`             |    —    | Maximum bytes written per connection write                                |
-| `KAFKA_MAX_READ_BYTES`              |    —    | Maximum bytes read from a broker response                                 |
-| `KAFKA_ALWAYS_RETRY_EOF`            | `false` | Retry EOF errors instead of treating them as terminal connection failures |
-| **Producer**                        |         |                                                                           |
-| `KAFKA_DEFAULT_PRODUCE_TOPIC`       |    —    | Fallback topic if `kgo.Record.Topic` is empty                             |
-| `KAFKA_PRODUCER_BATCH_MAX_BYTES`    |    —    | Maximum size of a producer batch                                          |
-| `KAFKA_MAX_BUFFERED_RECORDS`        |    —    | Maximum buffered records before producing blocks                          |
-| `KAFKA_MAX_BUFFERED_BYTES`          |    —    | Maximum buffered bytes before producing blocks                            |
-| `KAFKA_PRODUCE_REQUEST_TIMEOUT`     |    —    | Broker response timeout for produce requests                              |
-| `KAFKA_RECORD_RETRIES`              |    —    | Number of record-level produce retries                                    |
-| `KAFKA_RECORD_DELIVERY_TIMEOUT`     |    —    | Maximum buffer time for a record before timeout                           |
-| `KAFKA_PRODUCER_LINGER`             |    —    | Delay used to wait for more records before building a producer batch      |
-| `KAFKA_TRANSACTIONAL_ID`            |    —    | Unique identifier to enable transactional producing                       |
-| `KAFKA_TRANSACTION_TIMEOUT`         |    —    | Maximum allowed transaction duration                                      |
-| **Consumer**                |         |                                                                           |
-| `KAFKA_ENABLED`                     | `true`  | Enables the consumer loop                                                 |
-| `KAFKA_TOPICS`                      |    —    | Comma-separated list of topics to consume                                 |
-| `KAFKA_GROUP`                       |    —    | Consumer group ID required for offset commits                             |
-| `KAFKA_MAX_POLL_RECORDS`            |  `100`  | Maximum records handled per poll iteration                                |
-| `KAFKA_POLL_INTERVAL`               |  `1s`   | Interval between poll iterations                                          |
-| `KAFKA_SKIP_FATAL_ERRORS`           | `true`  | Continue after non-retryable fetch errors                                 |
-| `KAFKA_SUSPEND_PROCESSING_TIMEOUT`  |  `30s`  | Backoff delay after a handler error                                       |
-| `KAFKA_SUSPEND_COMMITTING_TIMEOUT`  |  `10s`  | Backoff delay after a commit or ack error                                 |
-| `KAFKA_INSTANCE_ID`                 |    —    | Static group membership identifier                                        |
-| `KAFKA_CONSUME_REGEX`               | `false` | Treat configured topics as regular expressions                            |
-| `KAFKA_DISABLE_FETCH_SESSIONS`      | `false` | Disable Kafka fetch sessions                                              |
-| `KAFKA_RACK`                        |    —    | Rack identifier for rack-aware fetching                                   |
-| `KAFKA_MAX_CONCURRENT_FETCHES`      |    —    | Maximum concurrent fetches buffered by the client                         |
-| `KAFKA_SESSION_TIMEOUT`             |    —    | Maximum time between heartbeats before rebalance                          |
-| `KAFKA_REBALANCE_TIMEOUT`           |    —    | Maximum time for members to rejoin on rebalance                           |
-| `KAFKA_HEARTBEAT_INTERVAL`          |    —    | Heartbeat interval                                                        |
-| `KAFKA_FETCH_MAX_WAIT`              |    —    | Maximum broker wait time for incomplete fetches                           |
-| `KAFKA_FETCH_MIN_BYTES`             |    —    | Minimum bytes a broker tries to accumulate before responding              |
-| `KAFKA_FETCH_MAX_BYTES`             |    —    | Maximum bytes per fetch response                                          |
-| `KAFKA_FETCH_MAX_PARTITION_BYTES`   |    —    | Maximum bytes per partition fetch                                         |
-| **Share Groups**             |         |                                                                           |
-| `KAFKA_SHARE_GROUP`                 |    —    | Share group identifier                                                    |
-| `KAFKA_SHARE_MAX_RECORDS`           |    —    | Maximum records returned per share fetch                                  |
-| `KAFKA_SHARE_MAX_RECORDS_STRICT`    | `false` | Strictly cap records per share fetch                                      |
-| `KAFKA_SHARE_REJECT_AFTER_DELIVERIES` |    —    | Delivery limit before triggering `AckReject`                              |
-| `KAFKA_SHARE_RELEASE_TIMEOUT`       |    —    | Backoff delay before releasing failed records                             |
+| Variable | Default | Description |
+|---|---|---|
+| KAFKA_BROKERS | | Comma-separated seed brokers |
+| KAFKA_SASL_MECHANISM | | PLAIN, SCRAM-SHA-256, or SCRAM-SHA-512 |
+| KAFKA_USER | | SASL username |
+| KAFKA_PASSWORD | | SASL password |
+| KAFKA_REQUEST_TIMEOUT_OVERHEAD | | Request deadline overhead |
+| KAFKA_REQUEST_RETRIES | | Max request retries |
+| KAFKA_RETRY_TIMEOUT | | Total retry time limit |
+| KAFKA_DIAL_TIMEOUT | | Broker dial timeout |
+| KAFKA_CONN_IDLE_TIMEOUT | | Idle connection timeout |
+| KAFKA_METADATA_MAX_AGE | | Max age of cached metadata |
+| KAFKA_METADATA_MIN_AGE | | Min time between metadata refreshes |
+| KAFKA_MAX_WRITE_BYTES | | Max bytes per connection write |
+| KAFKA_MAX_READ_BYTES | | Max bytes per broker response |
+| KAFKA_ALWAYS_RETRY_EOF | false | Retry EOF errors instead of failing connection |
+| KAFKA_DEFAULT_PRODUCE_TOPIC | | Fallback topic if record topic is empty |
+| KAFKA_PRODUCER_BATCH_MAX_BYTES | | Max size of a producer batch |
+| KAFKA_MAX_BUFFERED_RECORDS | | Max buffered records before blocking |
+| KAFKA_MAX_BUFFERED_BYTES | | Max buffered bytes before blocking |
+| KAFKA_PRODUCE_REQUEST_TIMEOUT | | Broker response timeout for produce requests |
+| KAFKA_RECORD_RETRIES | | Max record-level produce retries |
+| KAFKA_RECORD_DELIVERY_TIMEOUT | | Max record buffering time |
+| KAFKA_PRODUCER_LINGER | | Linger delay for batch building |
+| KAFKA_TRANSACTIONAL_ID | | Transactional identifier for EOS |
+| KAFKA_TRANSACTION_TIMEOUT | | Max transaction duration |
+| KAFKA_ENABLED | true | Enable consumer loop |
+| KAFKA_TOPICS | | Comma-separated topics to consume |
+| KAFKA_GROUP | | Consumer group ID |
+| KAFKA_MAX_POLL_RECORDS | 100 | Max records per poll |
+| KAFKA_POLL_INTERVAL | 1s | Interval between polls |
+| KAFKA_SKIP_FATAL_ERRORS | true | Continue on non-retryable fetch errors |
+| KAFKA_SUSPEND_PROCESSING_TIMEOUT | 30s | Backoff delay after handler error |
+| KAFKA_SUSPEND_COMMITTING_TIMEOUT | 10s | Backoff delay after commit/ack error |
+| KAFKA_INSTANCE_ID | | Static group membership ID |
+| KAFKA_CONSUME_REGEX | false | Treat topics as regular expressions |
+| KAFKA_DISABLE_FETCH_SESSIONS | false | Disable fetch sessions |
+| KAFKA_RACK | | Rack ID for rack-aware fetching |
+| KAFKA_MAX_CONCURRENT_FETCHES | | Max concurrent fetches buffered by client |
+| KAFKA_SESSION_TIMEOUT | | Rebalance session timeout |
+| KAFKA_REBALANCE_TIMEOUT | | Max time for members to rejoin |
+| KAFKA_HEARTBEAT_INTERVAL | | Heartbeat interval |
+| KAFKA_FETCH_MAX_WAIT | | Max broker wait time for fetches |
+| KAFKA_FETCH_MIN_BYTES | | Min bytes broker accumulates before response |
+| KAFKA_FETCH_MAX_BYTES | | Max bytes per fetch response |
+| KAFKA_FETCH_MAX_PARTITION_BYTES | | Max bytes per partition fetch |
+| KAFKA_SHARE_GROUP | | Share group ID |
+| KAFKA_SHARE_MAX_RECORDS | | Max records per share fetch |
+| KAFKA_SHARE_MAX_RECORDS_STRICT | false | Strictly cap records per share fetch |
+| KAFKA_SHARE_REJECT_AFTER_DELIVERIES | | Delivery limit before triggering AckReject |
+| KAFKA_SHARE_RELEASE_TIMEOUT | | Backoff delay before releasing failed records |
 
 ## License
 
