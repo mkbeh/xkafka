@@ -45,13 +45,13 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
 		}
 
-		if err := producer.ProduceSync(ctx, &kgo.Record{
+		if err := tx.ProduceSync(ctx, &kgo.Record{
 			Key:   []byte(strconv.Itoa(msg.ID)),
 			Value: payload,
 		}); err != nil {
@@ -77,13 +77,13 @@ func produceErrorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
 		}
 
-		if err := producer.ProduceSync(ctx, &kgo.Record{
+		if err := tx.ProduceSync(ctx, &kgo.Record{
 			Key:   []byte(strconv.Itoa(msg.ID)),
 			Value: payload,
 		}); err != nil {
@@ -118,13 +118,13 @@ func producePanicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
 		}
 
-		if err := producer.ProduceSync(ctx, &kgo.Record{
+		if err := tx.ProduceSync(ctx, &kgo.Record{
 			Key:   []byte(strconv.Itoa(msg.ID)),
 			Value: payload,
 		}); err != nil {

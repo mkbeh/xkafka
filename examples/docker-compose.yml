@@ -55,6 +55,18 @@ services:
     networks:
       - sample-network
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: sample-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - sample-network
+
   init-kafka:
     image: confluentinc/cp-kafka:latest
     container_name: sample-kafka-init
@@ -73,6 +85,7 @@ services:
           "sample-eos-input-topic"
           "sample-eos-output-topic"
           "sample-env-topic"
+          "sample-tracing-topic"
         )
         
         echo "init-kafka started"

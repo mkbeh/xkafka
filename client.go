@@ -43,6 +43,8 @@ func NewClient(opts ...Opt) (*Client, error) {
 		cl:   cl,
 	}
 
+	// Bind the fetch handler after Client is created because the adapter needs
+	// Client-specific operations such as offset commits and Share Group acknowledgments.
 	if cl.clientHandleFetches != nil {
 		cl.handleFetches = cl.clientHandleFetches(c)
 	}
@@ -118,7 +120,9 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		}
 	}()
 
-	if err = fn(ctx); err != nil {
+	tx := &Tx{cl: c.cl}
+
+	if err = fn(ctx, tx); err != nil {
 		return err
 	}
 
@@ -263,7 +267,6 @@ func (c *Client) handleBatch(
 
 		if err != nil {
 			c.cl.metrics.Consumer().CollectHandleErrors("")
-
 			c.cl.logger.ErrorContext(ctx, "error handling records",
 				kslog.Error(err),
 				kslog.Records(c.cl.formatRecords(records...)),

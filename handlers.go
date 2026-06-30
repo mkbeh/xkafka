@@ -8,7 +8,7 @@ import (
 
 type (
 	// TxFunc handles work inside a Kafka transaction.
-	TxFunc func(ctx context.Context) error
+	TxFunc func(ctx context.Context, tx *Tx) error
 
 	// ProducePromiseFunc is called when producing a record completes.
 	ProducePromiseFunc func(record *kgo.Record, err error)

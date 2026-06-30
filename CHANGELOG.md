@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.1 - Jun 29, 2026
+## v0.3.2 - Jun 29, 2026
 
 Initial maintained release of `xkafka`.
 
@@ -16,6 +16,7 @@ Initial maintained release of `xkafka`.
 * **Share Group** consumption support with `AckAccept`, `AckRelease`, and `AckReject` behaviors.
 * **TLS and SASL** configuration support.
 * **OpenTelemetry** hooks for Kafka client metrics and tracing.
+* **OpenTelemetry tracing** with backend-agnostic `TracerProvider` and `TextMapPropagator`.
 * **Prometheus** wrapper-level metrics.
 * Shared **`Config`** structure for producer, consumer, Share Group, and transaction workflows.
 * Environment variable tags for **`Config`**.
@@ -25,4 +26,4 @@ Initial maintained release of `xkafka`.
 ### Notes
 
 * **`GroupTransactSession`** is designed for consume-process-produce loops requiring atomic commits of records and
-  offsets.д
+  offsets.
