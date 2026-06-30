@@ -36,7 +36,7 @@ go get github.com/mkbeh/xkafka
 
 ## Quick start
 
-These examples show basic producing and consuming flows. For production workloads, tune retries, offset commits,
+These example show basic producing and consuming flows. For production workloads, tune retries, offset commits,
 security, and observability for your needs.
 
 <!-- @formatter:off -->

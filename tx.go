@@ -12,12 +12,12 @@ type Tx struct {
 }
 
 // Produce asynchronously produces a record inside the current Kafka transaction.
-func (tx *Tx) Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (tx *Tx) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	tx.cl.Produce(ctx, record, promise)
 }
 
 // TryProduce attempts to enqueue a record inside the current Kafka transaction without blocking on producer backpressure.
-func (tx *Tx) TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (tx *Tx) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	tx.cl.TryProduce(ctx, record, promise)
 }
 

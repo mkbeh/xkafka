@@ -52,11 +52,11 @@ func NewClient(opts ...Opt) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (c *Client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.cl.Produce(ctx, record, promise)
 }
 
-func (c *Client) TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (c *Client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.cl.TryProduce(ctx, record, promise)
 }
 
