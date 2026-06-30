@@ -17,5 +17,5 @@ type (
 	BatchHandlerFunc func(ctx context.Context, records []*kgo.Record) error
 
 	// BatchTxHandlerFunc handles a batch of consumed Kafka records inside a group transaction.
-	BatchTxHandlerFunc func(ctx context.Context, records []*kgo.Record, session *GroupTransactSession) error
+	BatchTxHandlerFunc func(ctx context.Context, records []*kgo.Record, tx *Tx) error
 )
