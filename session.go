@@ -145,7 +145,9 @@ func (g *GroupTransactSession) handleBatchInTx(
 		}
 	}()
 
-	handleErr = handler(ctx, records, g)
+	tx := &Tx{cl: g.cl}
+
+	handleErr = handler(ctx, records, tx)
 
 	endTry := kgo.TryCommit
 	if handleErr != nil {

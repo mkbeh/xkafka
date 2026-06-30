@@ -203,7 +203,7 @@ session, err := xkafka.NewGroupTransactSession(
 		TransactionalID: "orders-eos-session",
 	}),
 	xkafka.WithGroupTransactSessionBatchHandler(
-		func(ctx context.Context, records []*kgo.Record, tx *xkafka.GroupTransactSession) error {
+		func(ctx context.Context, records []*kgo.Record, tx *xkafka.Tx) error {
 			for _, record := range records {
 				if err := tx.ProduceSync(ctx, &kgo.Record{
 					Topic: "orders.output",
