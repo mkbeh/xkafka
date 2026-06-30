@@ -137,11 +137,8 @@ if err := client.RunInTx(ctx, func(ctx context.Context, tx *xkafka.Tx) error {
 <!-- @formatter:on -->
 
 > [!NOTE]
-> `RunInTx` executes your function inside a Kafka transaction, automatically committing on `nil` and aborting on
-> returned errors or panics. If a panic occurs, the transaction is aborted, and the original panic is re-thrown.
->
-> To ensure consumers ignore these aborted records, configure them with `kgo.ReadCommitted()` using
-`WithFetchIsolationLevel`.
+> `RunInTx` automatically commits on `nil` and aborts on errors or panics. To prevent consumers from reading aborted
+> records, enable `kgo.ReadCommitted()` using `WithFetchIsolationLevel`.
 
 ## Share Groups
 
