@@ -42,6 +42,8 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 		cl:   cl,
 	}
 
+	// Bind the fetch handler after GroupTransactSession is created because the adapter
+	// needs the session instance to produce records and commit offsets transactionally.
 	if cl.groupHandleFetches != nil {
 		cl.handleFetches = cl.groupHandleFetches(g)
 	}

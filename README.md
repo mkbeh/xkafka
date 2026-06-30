@@ -112,8 +112,8 @@ defer func() {
 	}
 }()
 
-if err := client.RunInTx(ctx, func(ctx context.Context) error {
-	if err := client.ProduceSync(ctx, &kgo.Record{
+if err := client.RunInTx(ctx, func(ctx context.Context, tx *xkafka.Tx) error {
+	if err := tx.ProduceSync(ctx, &kgo.Record{
 		Topic: "orders.created",
 		Key:   []byte("order-1"),
 		Value: []byte("created"),
@@ -121,10 +121,10 @@ if err := client.RunInTx(ctx, func(ctx context.Context) error {
 		return err
 	}
 
-	if err := client.ProduceSync(ctx, &kgo.Record{
+	if err := tx.ProduceSync(ctx, &kgo.Record{
 		Topic: "audit.events",
 		Key:   []byte("order-1"),
-		Value: []byte("order created"),
+		Value: []byte("audited" ),
 	}); err != nil {
 		return err
 	}
@@ -138,8 +138,10 @@ if err := client.RunInTx(ctx, func(ctx context.Context) error {
 
 
 > [!NOTE]
-> `RunInTx` executes your function inside a Kafka transaction. It commits automatically on `nil` and aborts on any
-> returned error or panic.
+> `RunInTx` executes your function inside a Kafka transaction. It commits automatically on `nil` and aborts on returned
+> errors.
+>
+> If the function panics, `RunInTx` aborts the transaction and re-throws the original panic.
 >
 > Consumers that must ignore aborted transactional records should use `kgo.ReadCommitted()` through
 > `WithFetchIsolationLevel`.
@@ -249,7 +251,7 @@ share group, and transaction workflows.
 * **OpenTelemetry:** Metrics and distributed tracing via `franz-go` hooks.
 * **Prometheus:** Wrapper-level metrics for produce, consume, share group, and transaction operations.
 
-#### Configuration Options
+### Instrumentation Options
 
 ```go
 xkafka.WithMeterProvider(meterProvider)
@@ -258,6 +260,11 @@ xkafka.WithTracerPropagator(propagator)
 xkafka.WithMetricsNamespace("orders")
 xkafka.WithMetricLabel("service", "orders-api")
 ```
+
+`xkafka` does not depend on a specific tracing backend. Provide an OpenTelemetry `TracerProvider` through
+`WithTracerProvider`, and export traces using your application or OpenTelemetry Collector pipeline.
+
+A runnable tracing example is available in [examples/tracing](examples/tracing).
 
 ### Metric naming
 

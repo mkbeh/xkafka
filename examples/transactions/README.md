@@ -22,6 +22,34 @@ KAFKA_TX_GROUP=sample-tx-group
 KAFKA_TRANSACTIONAL_ID=sample-tx-producer
 ```
 
+## Local Kafka setup
+
+Examples can use the local Kafka setup from `examples/docker-compose.yml`.
+
+From the repository root:
+
+```shell
+docker compose -f examples/docker-compose.yml up -d
+````
+
+Or from this example directory:
+
+```shell
+docker compose -f ../docker-compose.yml up -d
+```
+
+Kafka is available at:
+
+```text
+localhost:29092
+```
+
+Redpanda Console is available at:
+
+```text
+http://localhost:18080
+```
+
 ## Run
 
 From this directory:
