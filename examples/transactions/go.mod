@@ -3,7 +3,7 @@ module transactions
 go 1.26
 
 require (
-	github.com/mkbeh/xkafka v0.3.1
+	github.com/mkbeh/xkafka v0.3.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.21.4
 )
@@ -14,12 +14,12 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.69.0 // indirect
-	github.com/prometheus/procfs v0.21.0 // indirect
+	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
 	github.com/twmb/franz-go/plugin/kotel v1.7.0 // indirect
 	github.com/twmb/franz-go/plugin/kprom v1.4.0 // indirect
