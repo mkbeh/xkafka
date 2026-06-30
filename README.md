@@ -137,10 +137,11 @@ if err := client.RunInTx(ctx, func(ctx context.Context, tx *xkafka.Tx) error {
 <!-- @formatter:on -->
 
 > [!NOTE]
-> `RunInTx` executes your function inside a Kafka transaction, automatically committing on `nil` and aborting on returned errors or panics. If a panic occurs, the transaction is aborted, and the original panic is re-thrown.
+> `RunInTx` executes your function inside a Kafka transaction, automatically committing on `nil` and aborting on
+> returned errors or panics. If a panic occurs, the transaction is aborted, and the original panic is re-thrown.
 >
-> To ensure consumers ignore these aborted records, configure them with `kgo.ReadCommitted()` using `WithFetchIsolationLevel`.
-
+> To ensure consumers ignore these aborted records, configure them with `kgo.ReadCommitted()` using
+`WithFetchIsolationLevel`.
 
 ## Share Groups
 
@@ -181,12 +182,10 @@ if err := client.HandleFetches(ctx); err != nil {
 <!-- @formatter:on -->
 
 > [!NOTE]
-> **Share Group Ack Rules**
->
-> * `handler success` - `AckAccept`
-> * `handler error` - `AckRelease`
-> * `delivery limit` - `AckReject` if `ShareRejectAfterDeliveries > 0`; otherwise records keep being released with
-    `AckRelease`
+> **Share Group Ack Rules:** Successful handlers trigger `AckAccept`, while errors trigger `AckRelease`. If the delivery
+> limit is reached, records are marked as `AckReject` (if `ShareRejectAfterDeliveries > 0`), otherwise they continue to
+> be
+> released via `AckRelease`.
 
 ## Exactly-Once Semantics
 
