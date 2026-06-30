@@ -51,11 +51,11 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	return g, nil
 }
 
-func (g *GroupTransactSession) Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (g *GroupTransactSession) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.Produce(ctx, record, promise)
 }
 
-func (g *GroupTransactSession) TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error)) {
+func (g *GroupTransactSession) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.TryProduce(ctx, record, promise)
 }
 

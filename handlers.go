@@ -10,8 +10,8 @@ type (
 	// TxFunc handles work inside a Kafka transaction.
 	TxFunc func(ctx context.Context, tx *Tx) error
 
-	// ProducePromiseFunc is called when producing a record completes.
-	ProducePromiseFunc func(record *kgo.Record, err error)
+	// PromiseFunc is called when an asynchronous produce request completes.
+	PromiseFunc func(record *kgo.Record, err error)
 
 	// BatchHandlerFunc handles a batch of consumed Kafka records.
 	BatchHandlerFunc func(ctx context.Context, records []*kgo.Record) error

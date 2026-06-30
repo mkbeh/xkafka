@@ -43,7 +43,7 @@ type client struct {
 	metrics *kprom.Metrics
 
 	enabled     bool
-	promiseFunc ProducePromiseFunc
+	promiseFunc PromiseFunc
 
 	handleFetches       handleFetchesFunc
 	clientHandleFetches func(*Client) handleFetchesFunc
@@ -122,11 +122,11 @@ func newClient(opts ...Opt) (*client, error) {
 	return c, nil
 }
 
-func (c *client) Produce(ctx context.Context, record *kgo.Record, promise ProducePromiseFunc) {
+func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.conn.Produce(ctx, record, c.wrapPromise(promise))
 }
 
-func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise ProducePromiseFunc) {
+func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
 }
 
@@ -197,7 +197,7 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) wrapPromise(promise ProducePromiseFunc) ProducePromiseFunc {
+func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 	return func(record *kgo.Record, err error) {
 		c.loggingPromise(record, err)
 

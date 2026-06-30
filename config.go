@@ -529,7 +529,7 @@ func WithProducerBatchMaxBytesFn(fn func(topic string) int32) ProducerOpt {
 	}}
 }
 
-func WithProducePromise(promiseFunc ProducePromiseFunc) ProducerOpt {
+func WithProducePromise(promiseFunc PromiseFunc) ProducerOpt {
 	return producerOpt{fn: func(c *client) {
 		if promiseFunc != nil {
 			c.promiseFunc = promiseFunc
