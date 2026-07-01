@@ -38,9 +38,11 @@ var (
 type client struct {
 	conn conn
 
-	fmt     *kgo.RecordFormatter
-	logger  *slog.Logger
-	metrics *kprom.Metrics
+	fmt    *kgo.RecordFormatter
+	logger *slog.Logger
+
+	producerMetrics *kprom.ProducerMetrics
+	consumerMetrics *kprom.ConsumerMetrics
 
 	enabled     bool
 	promiseFunc PromiseFunc
@@ -108,9 +110,10 @@ func newClient(opts ...Opt) (*client, error) {
 	)
 
 	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
+	c.producerMetrics = metrics.Producer()
+	c.consumerMetrics = metrics.Consumer()
 
 	c.fmt = formatter
-	c.metrics = metrics
 	c.logger = c.logger.With(kslog.Component("kafka_client"))
 
 	c.clientOps = append(c.clientOps,
@@ -135,7 +138,7 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	for _, r := range results {
 		if r.Err != nil {
 			c.logger.ErrorContext(ctx, "error produce message sync", kslog.Error(r.Err))
-			c.metrics.Producer().CollectProduceError(recordTopic(r.Record))
+			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
 		}
 	}
 
@@ -175,7 +178,7 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		for _, fetchErr := range fetches.Errors() {
 			c.logger.ErrorContext(ctx, "error fetching records", kslog.Error(fetchErr.Err))
-			c.metrics.Consumer().CollectHandleErrors(fetchErr.Topic)
+			c.consumerMetrics.CollectHandleError(fetchErr.Topic)
 
 			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
 				return fetchErr.Err
@@ -221,7 +224,7 @@ func (c *client) loggingPromise(record *kgo.Record, err error) {
 	}
 
 	if err != nil {
-		c.metrics.Producer().CollectProduceError(recordTopic(record))
+		c.producerMetrics.CollectProduceError(recordTopic(record))
 		c.logger.ErrorContext(ctx, "kafka async producer error",
 			kslog.Error(err),
 			kslog.Record(c.fmt.AppendRecord(nil, record)),

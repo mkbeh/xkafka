@@ -92,7 +92,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		committed, handleErr, txErr := g.handleBatchInTx(ctx, records, handler)
 
 		for _, record := range records {
-			g.cl.metrics.Consumer().CollectHandleProcessTiming(startTime, record.Topic)
+			g.cl.consumerMetrics.CollectHandleProcessTiming(startTime, record.Topic)
 		}
 
 		if txErr != nil {
@@ -164,7 +164,7 @@ func (g *GroupTransactSession) handleBatchInTx(
 
 func (g *GroupTransactSession) handleGroupTxBatchError(ctx context.Context, records []*kgo.Record) {
 	for _, record := range records {
-		g.cl.metrics.Consumer().CollectHandleErrors(record.Topic)
+		g.cl.consumerMetrics.CollectHandleError(record.Topic)
 	}
 
 	timer := time.NewTimer(g.cl.suspendProcessingTimeout)
