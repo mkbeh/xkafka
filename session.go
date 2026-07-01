@@ -69,13 +69,13 @@ func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
 
 // Shutdown stops polling and closes the group transaction session.
 func (g *GroupTransactSession) Shutdown(_ context.Context) error {
-	g.cl.Close()
-
-	if g.conn == nil {
-		return nil
+	if g.cl != nil {
+		g.cl.Close()
 	}
 
-	g.conn.Close()
+	if g.conn != nil {
+		g.conn.Close()
+	}
 
 	return nil
 }
@@ -89,7 +89,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 
 		startTime := time.Now()
 
-		committed, handleErr, txErr := g.handleBatchInTx(ctx, records, handler)
+		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
 
 		for _, record := range records {
 			g.cl.consumerMetrics.CollectHandleProcessTiming(startTime, record.Topic)
@@ -101,7 +101,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				kslog.Records(g.cl.formatRecords(records...)),
 			)
 
-			g.handleGroupTxBatchError(ctx, records)
+			g.handleTxError(ctx, records)
 			return
 		}
 
@@ -111,7 +111,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				kslog.Records(g.cl.formatRecords(records...)),
 			)
 
-			g.handleGroupTxBatchError(ctx, records)
+			g.handleTxError(ctx, records)
 			return
 		}
 
@@ -129,7 +129,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 	}
 }
 
-func (g *GroupTransactSession) handleBatchInTx(
+func (g *GroupTransactSession) handleRecordsInTx(
 	ctx context.Context,
 	records []*kgo.Record,
 	handler BatchTxHandlerFunc,
@@ -145,7 +145,7 @@ func (g *GroupTransactSession) handleBatchInTx(
 		}
 	}()
 
-	tx := &Tx{cl: g.cl}
+	tx := Tx{cl: g.cl}
 
 	handleErr = handler(ctx, records, tx)
 
@@ -162,7 +162,7 @@ func (g *GroupTransactSession) handleBatchInTx(
 	return committed, handleErr, nil
 }
 
-func (g *GroupTransactSession) handleGroupTxBatchError(ctx context.Context, records []*kgo.Record) {
+func (g *GroupTransactSession) handleTxError(ctx context.Context, records []*kgo.Record) {
 	for _, record := range records {
 		g.cl.consumerMetrics.CollectHandleError(record.Topic)
 	}

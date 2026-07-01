@@ -13,7 +13,6 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
-	"go.opentelemetry.io/otel"
 )
 
 // handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
@@ -82,16 +81,13 @@ func newClient(opts ...Opt) (*client, error) {
 		batchSize:       100,
 		skipFatalErrors: true,
 
-		pollInterval:             time.Second * 1,
+		pollInterval:             time.Second,
 		suspendProcessingTimeout: time.Second * 30,
 		suspendCommittingTimeout: time.Second * 10,
 
-		labels: map[string]string{},
+		labels: make(map[string]string),
 		exitCh: make(chan struct{}),
 	}
-
-	c.meterOpts = append(c.meterOpts, kotel.MeterProvider(otel.GetMeterProvider()))
-	c.tracerOpts = append(c.tracerOpts, kotel.TracerProvider(otel.GetTracerProvider()))
 
 	for _, opt := range opts {
 		opt.apply(c)
@@ -99,13 +95,13 @@ func newClient(opts ...Opt) (*client, error) {
 
 	c.applyClientID()
 
+	c.logger = c.logger.With(kslog.Component("kafka_client"))
+
 	formatter, err := newFormatter()
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
 	}
-
 	c.fmt = formatter
-	c.logger = c.logger.With(kslog.Component("kafka_client"))
 
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(c.meterOpts...)),
@@ -200,6 +196,24 @@ func (c *client) Close() {
 	}
 }
 
+func (c *client) applyClientID() {
+	if c.clientID == "" {
+		c.clientID = uuid.NewString()
+	}
+
+	c.clientOps = append(c.clientOps, kgo.ClientID(c.clientID))
+	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.clientID))
+	c.setMetricLabel("client_id", c.clientID)
+}
+
+func (c *client) setMetricLabel(key, value string) {
+	if c.labels == nil {
+		c.labels = make(map[string]string)
+	}
+
+	c.labels[key] = value
+}
+
 func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 	return func(record *kgo.Record, err error) {
 		c.loggingPromise(record, err)
@@ -240,24 +254,6 @@ func (c *client) formatRecords(records ...*kgo.Record) []byte {
 	}
 
 	return buff
-}
-
-func (c *client) setMetricLabel(key, value string) {
-	if c.labels == nil {
-		c.labels = make(map[string]string)
-	}
-
-	c.labels[key] = value
-}
-
-func (c *client) applyClientID() {
-	if c.clientID == "" {
-		c.clientID = uuid.New().String()
-	}
-
-	c.clientOps = append(c.clientOps, kgo.ClientID(c.clientID))
-	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.clientID))
-	c.setMetricLabel("client_id", c.clientID)
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {

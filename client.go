@@ -64,6 +64,31 @@ func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	return c.cl.ProduceSync(ctx, records...)
 }
 
+// Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
+func (c *Client) Shutdown(ctx context.Context) error {
+	c.cl.Close()
+
+	if c.conn == nil {
+		return nil
+	}
+
+	var err error
+
+	if flushErr := c.conn.Flush(ctx); flushErr != nil {
+		c.cl.logger.ErrorContext(ctx, "error flushing producer records", kslog.Error(flushErr))
+		err = errors.Join(err, flushErr)
+	}
+
+	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
+		c.cl.logger.ErrorContext(ctx, "error flushing consumer acks", kslog.Error(flushErr))
+		err = errors.Join(err, flushErr)
+	}
+
+	c.conn.Close()
+
+	return err
+}
+
 func (c *Client) HandleFetches(ctx context.Context) error {
 	return c.cl.HandleFetches(ctx)
 }
@@ -120,7 +145,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		}
 	}()
 
-	tx := &Tx{cl: c.cl}
+	tx := Tx{cl: c.cl}
 
 	if err = fn(ctx, tx); err != nil {
 		return err
@@ -151,29 +176,20 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	return nil
 }
 
-// Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
-func (c *Client) Shutdown(ctx context.Context) error {
-	c.cl.Close()
-
-	if c.conn == nil {
-		return nil
+func (c *Client) abortTransaction(ctx context.Context) error {
+	// AbortBufferedRecords is required before aborting a transaction so that
+	// buffered records are not accidentally carried into the next transaction.
+	if err := c.conn.AbortBufferedRecords(ctx); err != nil {
+		c.cl.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
+		return fmt.Errorf("abort buffered records: %w", err)
 	}
 
-	var err error
-
-	if flushErr := c.conn.Flush(ctx); flushErr != nil {
-		c.cl.logger.ErrorContext(ctx, "error flushing producer records", kslog.Error(flushErr))
-		err = errors.Join(err, flushErr)
+	if err := c.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
+		c.cl.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
+		return fmt.Errorf("abort transaction: %w", err)
 	}
 
-	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
-		c.cl.logger.ErrorContext(ctx, "error flushing consumer acks", kslog.Error(flushErr))
-		err = errors.Join(err, flushErr)
-	}
-
-	c.conn.Close()
-
-	return err
+	return nil
 }
 
 func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
@@ -195,7 +211,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			case <-c.cl.exitCh:
 				return
 			default:
-				if err := c.handleBatch(ctx, records, handler); err != nil {
+				if err := c.handleRecords(ctx, records, handler); err != nil {
 					time.Sleep(c.cl.suspendProcessingTimeout)
 					continue
 				}
@@ -246,20 +262,16 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 		case <-c.cl.exitCh:
 			return
 		default:
-			if err := c.handleBatch(ctx, records, handler); err != nil {
-				c.ackErrorRecordsEternal(ctx, records)
+			if err := c.handleRecords(ctx, records, handler); err != nil {
+				c.ackRecordsEternal(ctx, records, true)
 				return
 			}
-			c.ackRecordsEternal(ctx, records)
+			c.ackRecordsEternal(ctx, records, false)
 		}
 	}
 }
 
-func (c *Client) handleBatch(
-	ctx context.Context,
-	records []*kgo.Record,
-	handler BatchHandlerFunc,
-) (err error) {
+func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
@@ -277,49 +289,36 @@ func (c *Client) handleBatch(
 	return handler(ctx, records)
 }
 
-func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record) {
-	for _, record := range records {
-		record.Ack(kgo.AckAccept)
-	}
-
-	c.flushAcksEternal(ctx, "")
-}
-
-func (c *Client) ackErrorRecordsEternal(ctx context.Context, records []*kgo.Record) {
-	releaseWaited := false
+func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, isError bool) {
+	var hasRelease bool
 
 	for _, record := range records {
-		status := c.errorAckStatus(record)
+		status := kgo.AckAccept
 
-		if status == kgo.AckRelease && !releaseWaited {
-			releaseWaited = true
-
-			if c.cl.shareReleaseTimeout > 0 {
-				timer := time.NewTimer(c.cl.shareReleaseTimeout)
-
-				select {
-				case <-ctx.Done():
-				case <-c.cl.exitCh:
-				case <-timer.C:
-				}
-
-				timer.Stop()
+		if isError {
+			status = kgo.AckRelease
+			if c.cl.shareRejectAfterDeliveries > 0 && record.DeliveryCount() >= c.cl.shareRejectAfterDeliveries {
+				status = kgo.AckReject
+			}
+			if status == kgo.AckRelease {
+				hasRelease = true
 			}
 		}
 
 		record.Ack(status)
 	}
 
-	c.flushAcksEternal(ctx, "")
-}
-
-func (c *Client) errorAckStatus(record *kgo.Record) kgo.AckStatus {
-	if c.cl.shareRejectAfterDeliveries > 0 &&
-		record.DeliveryCount() >= c.cl.shareRejectAfterDeliveries {
-		return kgo.AckReject
+	if hasRelease && c.cl.shareReleaseTimeout > 0 {
+		timer := time.NewTimer(c.cl.shareReleaseTimeout)
+		select {
+		case <-ctx.Done():
+		case <-c.cl.exitCh:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 
-	return kgo.AckRelease
+	c.flushAcksEternal(ctx, "")
 }
 
 func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
@@ -338,20 +337,4 @@ func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
 			return
 		}
 	}
-}
-
-func (c *Client) abortTransaction(ctx context.Context) error {
-	// AbortBufferedRecords is required before aborting a transaction so that
-	// buffered records are not accidentally carried into the next transaction.
-	if err := c.conn.AbortBufferedRecords(ctx); err != nil {
-		c.cl.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
-		return fmt.Errorf("abort buffered records: %w", err)
-	}
-
-	if err := c.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
-		c.cl.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
-		return fmt.Errorf("abort transaction: %w", err)
-	}
-
-	return nil
 }
