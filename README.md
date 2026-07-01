@@ -111,7 +111,7 @@ defer func() {
 	}
 }()
 
-if err := client.RunInTx(ctx, func(ctx context.Context, tx *xkafka.Tx) error {
+if err := client.RunInTx(ctx, func(ctx context.Context, tx xkafka.Tx) error {
 	if err := tx.ProduceSync(ctx, &kgo.Record{
 		Topic: "orders.created",
 		Key:   []byte("order-1"),
@@ -197,7 +197,7 @@ session, err := xkafka.NewGroupTransactSession(
 		TransactionalID: "orders-eos-session",
 	}),
 	xkafka.WithGroupTransactSessionBatchHandler(
-		func(ctx context.Context, records []*kgo.Record, tx *xkafka.Tx) error {
+		func(ctx context.Context, records []*kgo.Record, tx xkafka.Tx) error {
 			for _, record := range records {
 				if err := tx.ProduceSync(ctx, &kgo.Record{
 					Topic: "orders.output",
