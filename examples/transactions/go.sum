@@ -17,8 +17,8 @@ github.com/klauspost/compress v1.18.7 h1:aUyZsS4kH3QTKurYhAOwAHxllVPnOthb3vPfnF1
 github.com/klauspost/compress v1.18.7/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
-github.com/mkbeh/xkafka v0.4.0 h1:0z+ggzMaR1JibuA3v/EVBaI127/3OVwfMS/G+QwWpMg=
-github.com/mkbeh/xkafka v0.4.0/go.mod h1:3tE1VNYJz/m8Lb0FInk0FPM8VKN2BeslC3VFcmm6I3k=
+github.com/mkbeh/xkafka v0.4.2 h1:97jBUZFGDb/biEN0IMH33p+z26t+8glpAtkfX/wBvw0=
+github.com/mkbeh/xkafka v0.4.2/go.mod h1:3tE1VNYJz/m8Lb0FInk0FPM8VKN2BeslC3VFcmm6I3k=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/pierrec/lz4/v4 v4.1.27 h1:+PhzhWDrjRj89TH2sw43nE3+4+W8lSxIuQadEHZyjUk=
