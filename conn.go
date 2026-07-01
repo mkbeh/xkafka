@@ -41,9 +41,6 @@ type client struct {
 	fmt    *kgo.RecordFormatter
 	logger *slog.Logger
 
-	producerMetrics *kprom.ProducerMetrics
-	consumerMetrics *kprom.ConsumerMetrics
-
 	enabled     bool
 	promiseFunc PromiseFunc
 
@@ -66,6 +63,9 @@ type client struct {
 	clientOps  []kgo.Opt
 	meterOpts  []kotel.MeterOpt
 	tracerOpts []kotel.TracerOpt
+
+	producerMetrics *kprom.ProducerMetrics
+	consumerMetrics *kprom.ConsumerMetrics
 
 	namespace string
 	labels    map[string]string
