@@ -219,7 +219,7 @@ func newGroupTransactSession() (*xkafka.GroupTransactSession, error) {
 		xkafka.WithGroupTransactSessionBatchHandler(func(
 			ctx context.Context,
 			records []*kgo.Record,
-			tx *xkafka.Tx,
+			tx xkafka.Tx,
 		) error {
 			fmt.Printf("group tx consume batch: records=%d\n", len(records))
 
