@@ -142,7 +142,7 @@ if err := client.RunInTx(ctx, func(ctx context.Context, tx *xkafka.Tx) error {
 
 ## Share Groups
 
-Use `WithConsumerShareBatchHandler` with `ShareGroup` to consume through Kafka Share Groups.
+Use `WithShareGroupBatchHandler` with `ShareGroup` to consume through Kafka Share Groups.
 
 <!-- @formatter:off -->
 ```go
@@ -159,7 +159,7 @@ client, err := xkafka.NewClient(
 		ShareRejectAfterDeliveries: 3,
 		ShareReleaseTimeout:        5 * time.Second,
 	}),
-	xkafka.WithConsumerShareBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
+	xkafka.WithShareGroupBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
 		for _, record := range records {
 			fmt.Printf("share record: topic=%s value=%s\n", record.Topic, record.Value)
 		}

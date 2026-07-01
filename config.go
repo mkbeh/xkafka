@@ -635,7 +635,7 @@ func WithConsumerBatchHandler(handler BatchHandlerFunc) ConsumerOpt {
 	}}
 }
 
-func WithConsumerShareBatchHandler(handler BatchHandlerFunc) ConsumerOpt {
+func WithShareGroupBatchHandler(handler BatchHandlerFunc) ConsumerOpt {
 	return consumerOpt{fn: func(cl *client) {
 		if handler != nil {
 			cl.clientHandleFetches = func(c *Client) handleFetchesFunc {

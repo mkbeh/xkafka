@@ -208,7 +208,7 @@ func newConsumer(index int) (*xkafka.Client, error) {
 			ShareRejectAfterDeliveries: rejectAfterDeliveries,
 		}),
 		xkafka.WithClientID(clientID),
-		xkafka.WithConsumerShareBatchHandler(func(_ context.Context, records []*kgo.Record) error {
+		xkafka.WithShareGroupBatchHandler(func(_ context.Context, records []*kgo.Record) error {
 			fmt.Printf("share consume: client_id=%s, records=%d\n", clientID, len(records))
 
 			time.Sleep(defaultHandlerProcessingDelay)
