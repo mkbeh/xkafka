@@ -109,12 +109,12 @@ func newClient(opts ...Opt) (*client, error) {
 		kotel.WithTracer(kotel.NewTracer(c.tracerOpts...)),
 	)
 
+	c.fmt = formatter
+	c.logger = c.logger.With(kslog.Component("kafka_client"))
+
 	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
 	c.producerMetrics = metrics.Producer()
 	c.consumerMetrics = metrics.Consumer()
-
-	c.fmt = formatter
-	c.logger = c.logger.With(kslog.Component("kafka_client"))
 
 	c.clientOps = append(c.clientOps,
 		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
