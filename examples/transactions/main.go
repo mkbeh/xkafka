@@ -45,7 +45,7 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
@@ -77,7 +77,7 @@ func produceErrorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
@@ -118,7 +118,7 @@ func producePanicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx *xkafka.Tx) error {
+	err := producer.RunInTx(r.Context(), func(ctx context.Context, tx xkafka.Tx) error {
 		payload, err := json.Marshal(&msg)
 		if err != nil {
 			return err
