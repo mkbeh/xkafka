@@ -15,8 +15,7 @@ const (
 )
 
 type ProducerMetrics struct {
-	produceErrorsTotal *prometheus.CounterVec
-
+	produceErrorsTotal  *prometheus.CounterVec
 	transactionsTotal   *prometheus.CounterVec
 	transactionDuration *prometheus.HistogramVec
 }
