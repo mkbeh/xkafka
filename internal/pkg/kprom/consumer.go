@@ -47,6 +47,6 @@ func (m *ConsumerMetrics) CollectHandleProcessTiming(startTime time.Time, topic 
 		Observe(time.Since(startTime).Seconds())
 }
 
-func (m *ConsumerMetrics) CollectHandleErrors(topic string) {
+func (m *ConsumerMetrics) CollectHandleError(topic string) {
 	m.handleErrors.WithLabelValues(topic, labelValue(m.labels, groupLabel)).Inc()
 }

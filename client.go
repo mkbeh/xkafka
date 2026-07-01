@@ -77,8 +77,8 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	txOutcome := kprom.TransactionOutcomeError
 
 	defer func() {
-		if c.cl.metrics != nil {
-			c.cl.metrics.Producer().CollectTransaction(startTime, txOutcome)
+		if c.cl.producerMetrics != nil {
+			c.cl.producerMetrics.CollectTransaction(startTime, txOutcome)
 		}
 	}()
 
@@ -185,7 +185,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 
 		defer func(startTime time.Time) {
 			for _, r := range records {
-				c.cl.metrics.Consumer().CollectHandleProcessTiming(startTime, r.Topic)
+				c.cl.consumerMetrics.CollectHandleProcessTiming(startTime, r.Topic)
 			}
 		}(time.Now())
 
@@ -218,7 +218,7 @@ infiniteLoop:
 			return
 		default:
 			if err := c.conn.CommitUncommittedOffsets(ctx); err != nil {
-				c.cl.metrics.Consumer().CollectHandleErrors("")
+				c.cl.consumerMetrics.CollectHandleError("")
 				c.cl.logger.ErrorContext(ctx, "error committing offsets", kslog.Error(err))
 				time.Sleep(c.cl.suspendCommittingTimeout)
 			} else {
@@ -238,7 +238,7 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 
 		defer func(startTime time.Time) {
 			for _, r := range records {
-				c.cl.metrics.Consumer().CollectHandleProcessTiming(startTime, r.Topic)
+				c.cl.consumerMetrics.CollectHandleProcessTiming(startTime, r.Topic)
 			}
 		}(time.Now())
 
@@ -266,7 +266,7 @@ func (c *Client) handleBatch(
 		}
 
 		if err != nil {
-			c.cl.metrics.Consumer().CollectHandleErrors("")
+			c.cl.consumerMetrics.CollectHandleError("")
 			c.cl.logger.ErrorContext(ctx, "error handling records",
 				kslog.Error(err),
 				kslog.Records(c.cl.formatRecords(records...)),
@@ -329,7 +329,7 @@ func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
 			return
 		default:
 			if err := c.conn.FlushAcks(ctx); err != nil {
-				c.cl.metrics.Consumer().CollectHandleErrors(topic)
+				c.cl.consumerMetrics.CollectHandleError(topic)
 				c.cl.logger.ErrorContext(ctx, "error flushing share group acks", kslog.Error(err))
 				time.Sleep(c.cl.suspendCommittingTimeout)
 				continue
