@@ -104,13 +104,13 @@ func newClient(opts ...Opt) (*client, error) {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
 	}
 
+	c.fmt = formatter
+	c.logger = c.logger.With(kslog.Component("kafka_client"))
+
 	instrumenting := kotel.NewKotel(
 		kotel.WithMeter(kotel.NewMeter(c.meterOpts...)),
 		kotel.WithTracer(kotel.NewTracer(c.tracerOpts...)),
 	)
-
-	c.fmt = formatter
-	c.logger = c.logger.With(kslog.Component("kafka_client"))
 
 	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
 	c.producerMetrics = metrics.Producer()
