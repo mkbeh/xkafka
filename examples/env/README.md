@@ -7,7 +7,6 @@ This example shows how to load `xkafka.Config` from environment variables using 
 * loading Kafka configuration from environment variables;
 * creating an xkafka client from the loaded config;
 * producing one record to the configured topic;
-* keeping env parsing outside the main xkafka module dependencies.
 
 ## Configuration
 

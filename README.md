@@ -46,7 +46,6 @@ ctx := context.Background()
 // Initialize the unified Kafka client.
 client, err := xkafka.NewClient(
 	xkafka.WithConfig(&xkafka.Config{
-		Enabled:             true,
 		Brokers:             "localhost:9092",
 		DefaultProduceTopic: "orders.created",
 		Topics:              "orders.created",
@@ -148,7 +147,6 @@ Use `WithShareGroupBatchHandler` with `ShareGroup` to consume through Kafka Shar
 ```go
 client, err := xkafka.NewClient(
 	xkafka.WithConfig(&xkafka.Config{
-		Enabled: true,
 		Brokers: "localhost:9092",
 		Topics:  "orders.created",
 
@@ -193,7 +191,6 @@ records atomically in the same Kafka transaction.
 ```go
 session, err := xkafka.NewGroupTransactSession(
 	xkafka.WithConfig(&xkafka.Config{
-		Enabled:         true,
 		Brokers:         "localhost:9092",
 		Topics:          "orders.input",
 		Group:           "orders-eos-group",
@@ -241,7 +238,7 @@ share group, and transaction workflows.
 * **OpenTelemetry:** Metrics and distributed tracing via `franz-go` hooks.
 * **Prometheus:** Wrapper-level metrics for produce, consume, share group, and transaction operations.
 
-### Instrumentation Options
+### Configuration
 
 ```go
 xkafka.WithMeterProvider(meterProvider)
