@@ -18,7 +18,7 @@ type GroupTransactSession struct {
 	cl   *client
 }
 
-// NewGroupTransactSession creates a Kafka group transaction session and verifies broker connectivity.
+// NewGroupTransactSession creates a Kafka group transaction session.
 func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	cl, err := newClient(opts...)
 	if err != nil {
@@ -28,11 +28,6 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	conn, err := kgo.NewGroupTransactSession(cl.clientOps...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create group transact session: %w", err)
-	}
-
-	if err := conn.Client().Ping(context.Background()); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("kafka: ping group transact session: %w", err)
 	}
 
 	cl.conn = conn
@@ -51,6 +46,22 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	return g, nil
 }
 
+func (g *GroupTransactSession) Ping(ctx context.Context) error {
+	if g == nil || g.conn == nil {
+		return fmt.Errorf("kafka: group transact session is nil")
+	}
+
+	if err := g.conn.Client().Ping(ctx); err != nil {
+		return fmt.Errorf("kafka: ping group transact session: %w", err)
+	}
+
+	return nil
+}
+
+func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
+	return g.cl.HandleFetches(ctx)
+}
+
 func (g *GroupTransactSession) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.Produce(ctx, record, promise)
 }
@@ -61,10 +72,6 @@ func (g *GroupTransactSession) TryProduce(ctx context.Context, record *kgo.Recor
 
 func (g *GroupTransactSession) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
 	return g.cl.ProduceSync(ctx, records...)
-}
-
-func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
-	return g.cl.HandleFetches(ctx)
 }
 
 // Shutdown stops polling and closes the group transaction session.

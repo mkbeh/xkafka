@@ -13,13 +13,13 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Client is a high-level Kafka client for producing records and consuming records through handlers.
+// Client provides Kafka produce and consume operations.
 type Client struct {
 	conn *kgo.Client
 	cl   *client
 }
 
-// NewClient creates a Kafka client with the provided options and verifies broker connectivity.
+// NewClient creates a Kafka client with the provided options.
 func NewClient(opts ...Opt) (*Client, error) {
 	cl, err := newClient(opts...)
 	if err != nil {
@@ -29,11 +29,6 @@ func NewClient(opts ...Opt) (*Client, error) {
 	conn, err := kgo.NewClient(cl.clientOps...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create client: %w", err)
-	}
-
-	if err := conn.Ping(context.Background()); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("kafka: ping client: %w", err)
 	}
 
 	cl.conn = conn
@@ -50,6 +45,22 @@ func NewClient(opts ...Opt) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.conn == nil {
+		return fmt.Errorf("kafka: client is nil")
+	}
+
+	if err := c.conn.Ping(ctx); err != nil {
+		return fmt.Errorf("kafka: ping client: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) HandleFetches(ctx context.Context) error {
+	return c.cl.HandleFetches(ctx)
 }
 
 func (c *Client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
@@ -87,10 +98,6 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	c.conn.Close()
 
 	return err
-}
-
-func (c *Client) HandleFetches(ctx context.Context) error {
-	return c.cl.HandleFetches(ctx)
 }
 
 // RunInTx executes fn inside a Kafka transaction.
