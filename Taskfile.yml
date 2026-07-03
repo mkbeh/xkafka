@@ -1,29 +1,69 @@
-version: 3
+version: "3"
 
 vars:
   LINTER_VER: "v2.12.2"
+  GOMODCACHE:
+    sh: go env GOMODCACHE
+  GOCACHE:
+    sh: go env GOCACHE
+  PWD_DIR:
+    sh: pwd
+
+env:
+  GOWORK: "off"
 
 tasks:
   run:
     desc: "Full cycle"
-    deps:
-      - lint
+    cmds:
+      - task: vendor-root
+      - task: lint-root
+      - task: test-root
 
   lint:
-    desc: "lint"
+    desc: "Lint root module"
     cmds:
-      - docker run --rm
+      - task: vendor-root
+      - task: lint-root
+
+  test:
+    desc: "Test root module"
+    cmds:
+      - task: vendor-root
+      - task: test-root
+
+  vendor-root:
+    desc: "Vendor root module"
+    cmds:
+      - rm -rf vendor
+      - go mod tidy -v
+      - go mod vendor
+
+  lint-root:
+    desc: "Lint root module"
+    cmds:
+      - task: _run-linter
+        vars:
+          WORK_DIR: /app
+
+  test-root:
+    desc: "Test root module"
+    cmds:
+      - go test -mod=vendor -race -v -count=1 ./...
+
+  _run-linter:
+    desc: "Run golangci-lint in Docker"
+    cmds:
+      - >
+        docker run --rm
         -u $(id -u):$(id -g)
-        -v {{.PWD}}:/app
-        -v {{.GOCACHE_ENV}}:/go/pkg/mod
-        -e GOCACHE=/go/pkg/mod
-        -e GOLANGCI_LINT_CACHE=/go/pkg/mod
+        -v {{.PWD_DIR}}:/app
+        -v {{.GOMODCACHE}}:/go/pkg/mod
+        -v {{.GOCACHE}}:/go/build-cache
+        -e GOMODCACHE=/go/pkg/mod
+        -e GOCACHE=/go/build-cache
+        -e GOLANGCI_LINT_CACHE=/go/build-cache/golangci-lint
         -e GOWORK=off
-        -w /app
+        -w {{.WORK_DIR}}
         golangci/golangci-lint:{{.LINTER_VER}}
         golangci-lint run --timeout 5m --fix --modules-download-mode vendor
-    vars:
-      GOCACHE_ENV:
-        sh: go env GOCACHE
-      PWD:
-        sh: pwd

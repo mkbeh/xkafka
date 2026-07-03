@@ -30,6 +30,8 @@ Explore ready-to-run use cases in [examples](examples).
 
 ## Installation
 
+This repository contains the core `xkafka` module. The core package is released from the repository root:
+
 ```bash
 go get github.com/mkbeh/xkafka
 ```
@@ -269,7 +271,7 @@ orders_kafka_transaction_duration_seconds
 > Low-level `franz-go` client metrics and traces are exported through OpenTelemetry hooks. `xkafka` adds wrapper-level
 > Prometheus metrics around producer, consumer, share group, and transaction workflows.
 >
-> For the full list of exported Prometheus metrics, see [internal/pkg/kprom/metrics.go](internal/pkg/kprom/metrics.go).
+> For the full list of exported Prometheus metrics, see [internal/pkg/kprom/metrics.go](internal/kprom/metrics.go).
 
 ## Configuration
 

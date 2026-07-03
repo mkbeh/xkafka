@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/mkbeh/xkafka/internal/pkg/kprom"
-	"github.com/mkbeh/xkafka/internal/pkg/kslog"
+	"github.com/mkbeh/xkafka/internal/kprom"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -86,12 +84,12 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	var err error
 
 	if flushErr := c.conn.Flush(ctx); flushErr != nil {
-		c.cl.logger.ErrorContext(ctx, "error flushing producer records", kslog.Error(flushErr))
+		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
 	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
-		c.cl.logger.ErrorContext(ctx, "error flushing consumer acks", kslog.Error(flushErr))
+		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
@@ -126,14 +124,12 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			c.cl.logger.ErrorContext(ctx, "panic recovered in kafka transaction, aborting",
-				slog.Any("error", r),
-			)
+			c.cl.logger.Log(kgo.LogLevelError, "panic recovered in kafka transaction, aborting", logKeyError, r)
 
 			if shouldAbort {
 				if abortErr := c.abortTransaction(ctx); abortErr != nil {
-					c.cl.logger.ErrorContext(ctx, "kafka transaction abort after panic failed",
-						kslog.Error(abortErr),
+					c.cl.logger.Log(kgo.LogLevelError, "kafka transaction abort after panic failed",
+						logKeyError, abortErr,
 					)
 				}
 			}
@@ -152,7 +148,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		}
 	}()
 
-	tx := Tx{cl: c.cl}
+	tx := &Tx{cl: c.cl}
 
 	if err = fn(ctx, tx); err != nil {
 		return err
@@ -187,12 +183,12 @@ func (c *Client) abortTransaction(ctx context.Context) error {
 	// AbortBufferedRecords is required before aborting a transaction so that
 	// buffered records are not accidentally carried into the next transaction.
 	if err := c.conn.AbortBufferedRecords(ctx); err != nil {
-		c.cl.logger.ErrorContext(ctx, "error aborting buffered records", kslog.Error(err))
+		c.cl.logger.Log(kgo.LogLevelError, "error aborting buffered records", logKeyError, err)
 		return fmt.Errorf("abort buffered records: %w", err)
 	}
 
 	if err := c.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
-		c.cl.logger.ErrorContext(ctx, "error rolling back transaction", kslog.Error(err))
+		c.cl.logger.Log(kgo.LogLevelError, "error rolling back transaction", logKeyError, err)
 		return fmt.Errorf("abort transaction: %w", err)
 	}
 
@@ -242,10 +238,9 @@ infiniteLoop:
 		default:
 			if err := c.conn.CommitUncommittedOffsets(ctx); err != nil {
 				c.cl.consumerMetrics.CollectHandleError("")
-				c.cl.logger.ErrorContext(ctx, "error committing offsets", kslog.Error(err))
+				c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
 			} else {
-				c.cl.logger.DebugContext(ctx, "offsets committed", kslog.Count(len(c.conn.CommittedOffsets())))
 				break infiniteLoop
 			}
 		}
@@ -286,9 +281,9 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 
 		if err != nil {
 			c.cl.consumerMetrics.CollectHandleError("")
-			c.cl.logger.ErrorContext(ctx, "error handling records",
-				kslog.Error(err),
-				kslog.Records(c.cl.formatRecords(records...)),
+			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
+				logKeyError, err,
+				logKeyRecords, c.cl.formatRecords(records...),
 			)
 		}
 	}()
@@ -336,7 +331,7 @@ func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
 		default:
 			if err := c.conn.FlushAcks(ctx); err != nil {
 				c.cl.consumerMetrics.CollectHandleError(topic)
-				c.cl.logger.ErrorContext(ctx, "error flushing share group acks", kslog.Error(err))
+				c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
 				continue
 			}
