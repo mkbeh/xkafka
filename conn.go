@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mkbeh/xkafka/internal/pkg/kprom"
-	"github.com/mkbeh/xkafka/internal/pkg/kslog"
+	"github.com/mkbeh/xkafka/internal/kprom"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
@@ -38,7 +36,7 @@ type client struct {
 	conn conn
 
 	fmt    *kgo.RecordFormatter
-	logger *slog.Logger
+	logger kgo.Logger
 
 	enabled     bool
 	promiseFunc PromiseFunc
@@ -74,7 +72,7 @@ type client struct {
 
 func newClient(opts ...Opt) (*client, error) {
 	c := &client{
-		logger: slog.Default(),
+		logger: newDefaultLogger(),
 
 		enabled: true,
 
@@ -95,8 +93,6 @@ func newClient(opts ...Opt) (*client, error) {
 
 	c.applyClientID()
 
-	c.logger = c.logger.With(kslog.Component("kafka_client"))
-
 	formatter, err := newFormatter()
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
@@ -113,32 +109,12 @@ func newClient(opts ...Opt) (*client, error) {
 	c.consumerMetrics = metrics.Consumer()
 
 	c.clientOps = append(c.clientOps,
-		kgo.WithLogger(kslog.NewKgoAdapter(c.logger)),
+		kgo.WithLogger(c.logger),
 		kgo.WithHooks(instrumenting.Hooks(), metrics.Hooks()),
 		kgo.KeepRetryableFetchErrors(),
 	)
 
 	return c, nil
-}
-
-func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.Produce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
-	results := c.conn.ProduceSync(ctx, records...)
-	for _, r := range results {
-		if r.Err != nil {
-			c.logger.ErrorContext(ctx, "error produce message sync", kslog.Error(r.Err))
-			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
-		}
-	}
-
-	return results.FirstErr()
 }
 
 func (c *client) HandleFetches(ctx context.Context) error {
@@ -168,12 +144,15 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		fetches := c.conn.PollRecords(ctx, c.batchSize)
 		if fetches.IsClientClosed() {
-			c.logger.InfoContext(ctx, "kafka client closed for topic(s)", kslog.ConsumerLabels(c.labels))
+			c.logger.Log(kgo.LogLevelInfo, "kafka client closed for topic(s)", logKeyConsumerLabels, c.labels)
 			return nil
 		}
 
 		for _, fetchErr := range fetches.Errors() {
-			c.logger.ErrorContext(ctx, "error fetching records", kslog.Error(fetchErr.Err))
+			c.logger.Log(kgo.LogLevelError, "error fetching records",
+				logKeyError, fetchErr.Err,
+				logKeyTopic, fetchErr.Topic,
+			)
 			c.consumerMetrics.CollectHandleError(fetchErr.Topic)
 
 			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
@@ -183,6 +162,26 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		c.handleFetches(ctx, fetches)
 	}
+}
+
+func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.Produce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
+	results := c.conn.ProduceSync(ctx, records...)
+	for _, r := range results {
+		if r.Err != nil {
+			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
+			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
+		}
+	}
+
+	return results.FirstErr()
 }
 
 // Close stops the polling loop and is safe to call multiple times.
@@ -230,30 +229,23 @@ func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 }
 
 func (c *client) loggingPromise(record *kgo.Record, err error) {
-	var ctx context.Context
-	if record.Context == nil {
-		ctx = context.Background()
-	} else {
-		ctx = record.Context
-	}
-
 	if err != nil {
 		c.producerMetrics.CollectProduceError(recordTopic(record))
-		c.logger.ErrorContext(ctx, "kafka async producer error",
-			kslog.Error(err),
-			kslog.Record(c.fmt.AppendRecord(nil, record)),
+		c.logger.Log(kgo.LogLevelError, "kafka async producer error",
+			logKeyError, err,
+			logKeyRecord, c.fmt.AppendRecord(nil, record),
 		)
 	}
 }
 
-func (c *client) formatRecords(records ...*kgo.Record) []byte {
+func (c *client) formatRecords(records ...*kgo.Record) string {
 	buff := make([]byte, 0)
 
 	for _, record := range records {
 		buff = c.fmt.AppendRecord(buff, record)
 	}
 
-	return buff
+	return string(buff)
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {

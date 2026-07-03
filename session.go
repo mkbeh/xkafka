@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mkbeh/xkafka/internal/pkg/kslog"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -103,9 +102,9 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if txErr != nil {
-			g.cl.logger.ErrorContext(ctx, "error handling group transaction",
-				kslog.Error(txErr),
-				kslog.Records(g.cl.formatRecords(records...)),
+			g.cl.logger.Log(kgo.LogLevelError, "error handling group transaction",
+				logKeyRecord, txErr,
+				logKeyRecords, g.cl.formatRecords(records...),
 			)
 
 			g.handleTxError(ctx, records)
@@ -113,9 +112,9 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if handleErr != nil {
-			g.cl.logger.ErrorContext(ctx, "error handling records in group transaction",
-				kslog.Error(handleErr),
-				kslog.Records(g.cl.formatRecords(records...)),
+			g.cl.logger.Log(kgo.LogLevelError, "error handling records in group transaction",
+				logKeyError, handleErr,
+				logKeyRecords, g.cl.formatRecords(records...),
 			)
 
 			g.handleTxError(ctx, records)
@@ -123,15 +122,15 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if !committed {
-			g.cl.logger.InfoContext(ctx, "group transaction aborted before commit",
-				kslog.ConsumerLabels(g.cl.labels),
+			g.cl.logger.Log(kgo.LogLevelInfo, "group transaction aborted before commit",
+				logKeyConsumerLabels, g.cl.labels,
 			)
 
 			return
 		}
 
-		g.cl.logger.DebugContext(ctx, "group transaction committed",
-			kslog.Count(len(records)),
+		g.cl.logger.Log(kgo.LogLevelDebug, "group transaction committed",
+			logKeyCount, len(records),
 		)
 	}
 }
@@ -152,7 +151,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 		}
 	}()
 
-	tx := Tx{cl: g.cl}
+	tx := &Tx{cl: g.cl}
 
 	handleErr = handler(ctx, records, tx)
 

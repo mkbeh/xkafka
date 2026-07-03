@@ -3,7 +3,6 @@ package xkafka
 import (
 	"crypto/tls"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -321,7 +320,7 @@ func WithConfig(config *Config) Opt {
 	}}
 }
 
-func WithLogger(logger *slog.Logger) Opt {
+func WithLogger(logger kgo.Logger) Opt {
 	return clientOpt{fn: func(c *client) {
 		if logger != nil {
 			c.logger = logger

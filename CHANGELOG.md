@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.4 - Jun 30, 2026
+## v0.5.0
 
 Initial maintained release of `xkafka`.
 
