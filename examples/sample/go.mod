@@ -3,10 +3,9 @@ module sample
 go 1.26
 
 require (
-	github.com/mkbeh/xkafka v0.4.4
+	github.com/mkbeh/xkafka v0.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.21.5
-	github.com/twmb/franz-go/plugin/kslog v1.0.0
 )
 
 require (
