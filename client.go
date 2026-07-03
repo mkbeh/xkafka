@@ -73,31 +73,6 @@ func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	return c.cl.ProduceSync(ctx, records...)
 }
 
-// Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
-func (c *Client) Shutdown(ctx context.Context) error {
-	c.cl.Close()
-
-	if c.conn == nil {
-		return nil
-	}
-
-	var err error
-
-	if flushErr := c.conn.Flush(ctx); flushErr != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
-		err = errors.Join(err, flushErr)
-	}
-
-	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
-		err = errors.Join(err, flushErr)
-	}
-
-	c.conn.Close()
-
-	return err
-}
-
 // RunInTx executes fn inside a Kafka transaction.
 //
 // The transaction is committed when fn returns nil. It is aborted when fn returns an error.
@@ -177,6 +152,31 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 	txOutcome = kprom.TransactionOutcomeCommit
 	return nil
+}
+
+// Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
+func (c *Client) Shutdown(ctx context.Context) error {
+	c.cl.Close()
+
+	if c.conn == nil {
+		return nil
+	}
+
+	var err error
+
+	if flushErr := c.conn.Flush(ctx); flushErr != nil {
+		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
+		err = errors.Join(err, flushErr)
+	}
+
+	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
+		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
+		err = errors.Join(err, flushErr)
+	}
+
+	c.conn.Close()
+
+	return err
 }
 
 func (c *Client) abortTransaction(ctx context.Context) error {
@@ -273,24 +273,6 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 	}
 }
 
-func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("kafka: batch handler panic: %v", r)
-		}
-
-		if err != nil {
-			c.cl.consumerMetrics.CollectHandleError("")
-			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
-				logKeyError, err,
-				logKeyRecords, c.cl.formatRecords(records...),
-			)
-		}
-	}()
-
-	return handler(ctx, records)
-}
-
 func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, isError bool) {
 	var hasRelease bool
 
@@ -339,4 +321,22 @@ func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
 			return
 		}
 	}
+}
+
+func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("kafka: batch handler panic: %v", r)
+		}
+
+		if err != nil {
+			c.cl.consumerMetrics.CollectHandleError("")
+			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
+				logKeyError, err,
+				logKeyRecords, c.cl.formatRecords(records...),
+			)
+		}
+	}()
+
+	return handler(ctx, records)
 }

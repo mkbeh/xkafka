@@ -117,26 +117,6 @@ func newClient(opts ...Opt) (*client, error) {
 	return c, nil
 }
 
-func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.Produce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
-	results := c.conn.ProduceSync(ctx, records...)
-	for _, r := range results {
-		if r.Err != nil {
-			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
-			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
-		}
-	}
-
-	return results.FirstErr()
-}
-
 func (c *client) HandleFetches(ctx context.Context) error {
 	if !c.enabled {
 		return nil
@@ -169,7 +149,10 @@ func (c *client) HandleFetches(ctx context.Context) error {
 		}
 
 		for _, fetchErr := range fetches.Errors() {
-			c.logger.Log(kgo.LogLevelError, "error fetching records", logKeyError, fetchErr.Err)
+			c.logger.Log(kgo.LogLevelError, "error fetching records",
+				logKeyError, fetchErr.Err,
+				logKeyTopic, fetchErr.Topic,
+			)
 			c.consumerMetrics.CollectHandleError(fetchErr.Topic)
 
 			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
@@ -179,6 +162,26 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		c.handleFetches(ctx, fetches)
 	}
+}
+
+func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.Produce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
+	results := c.conn.ProduceSync(ctx, records...)
+	for _, r := range results {
+		if r.Err != nil {
+			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
+			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
+		}
+	}
+
+	return results.FirstErr()
 }
 
 // Close stops the polling loop and is safe to call multiple times.

@@ -8,6 +8,7 @@ import (
 
 const (
 	logKeyError          = "error"
+	logKeyTopic          = "topic"
 	logKeyRecord         = "record"
 	logKeyRecords        = "records"
 	logKeyCount          = "count"
