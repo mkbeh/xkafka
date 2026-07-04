@@ -90,7 +90,7 @@ if err := client.ProduceSync(ctx, &kgo.Record{
 > [!IMPORTANT]
 > Records are considered processed only when the handler returns `nil`.
 > If the handler returns an error, offsets are not committed and processing resumes after
-> `KAFKA_SUSPEND_PROCESSING_TIMEOUT`.
+> `SUSPEND_PROCESSING_TIMEOUT`.
 
 ## Transactions
 
@@ -285,55 +285,55 @@ See [examples/env](examples/env).
 
 | Variable | Default | Description |
 |---|---|---|
-| KAFKA_BROKERS | | Comma-separated seed brokers |
-| KAFKA_SASL_MECHANISM | | PLAIN, SCRAM-SHA-256, or SCRAM-SHA-512 |
-| KAFKA_USER | | SASL username |
-| KAFKA_PASSWORD | | SASL password |
-| KAFKA_REQUEST_TIMEOUT_OVERHEAD | | Request deadline overhead |
-| KAFKA_REQUEST_RETRIES | | Max request retries |
-| KAFKA_RETRY_TIMEOUT | | Total retry time limit |
-| KAFKA_DIAL_TIMEOUT | | Broker dial timeout |
-| KAFKA_CONN_IDLE_TIMEOUT | | Idle connection timeout |
-| KAFKA_METADATA_MAX_AGE | | Max age of cached metadata |
-| KAFKA_METADATA_MIN_AGE | | Min time between metadata refreshes |
-| KAFKA_MAX_WRITE_BYTES | | Max bytes per connection write |
-| KAFKA_MAX_READ_BYTES | | Max bytes per broker response |
-| KAFKA_ALWAYS_RETRY_EOF | false | Retry EOF errors instead of failing connection |
-| KAFKA_DEFAULT_PRODUCE_TOPIC | | Fallback topic if record topic is empty |
-| KAFKA_PRODUCER_BATCH_MAX_BYTES | | Max size of a producer batch |
-| KAFKA_MAX_BUFFERED_RECORDS | | Max buffered records before blocking |
-| KAFKA_MAX_BUFFERED_BYTES | | Max buffered bytes before blocking |
-| KAFKA_PRODUCE_REQUEST_TIMEOUT | | Broker response timeout for produce requests |
-| KAFKA_RECORD_RETRIES | | Max record-level produce retries |
-| KAFKA_RECORD_DELIVERY_TIMEOUT | | Max record buffering time |
-| KAFKA_PRODUCER_LINGER | | Linger delay for batch building |
-| KAFKA_TRANSACTIONAL_ID | | Transactional identifier for EOS |
-| KAFKA_TRANSACTION_TIMEOUT | | Max transaction duration |
-| KAFKA_ENABLED | true | Enable consumer loop |
-| KAFKA_TOPICS | | Comma-separated topics to consume |
-| KAFKA_GROUP | | Consumer group ID |
-| KAFKA_MAX_POLL_RECORDS | 100 | Max records per poll |
-| KAFKA_POLL_INTERVAL | 1s | Interval between polls |
-| KAFKA_SKIP_FATAL_ERRORS | true | Continue on non-retryable fetch errors |
-| KAFKA_SUSPEND_PROCESSING_TIMEOUT | 30s | Backoff delay after handler error |
-| KAFKA_SUSPEND_COMMITTING_TIMEOUT | 10s | Backoff delay after commit/ack error |
-| KAFKA_INSTANCE_ID | | Static group membership ID |
-| KAFKA_CONSUME_REGEX | false | Treat topics as regular expressions |
-| KAFKA_DISABLE_FETCH_SESSIONS | false | Disable fetch sessions |
-| KAFKA_RACK | | Rack ID for rack-aware fetching |
-| KAFKA_MAX_CONCURRENT_FETCHES | | Max concurrent fetches buffered by client |
-| KAFKA_SESSION_TIMEOUT | | Rebalance session timeout |
-| KAFKA_REBALANCE_TIMEOUT | | Max time for members to rejoin |
-| KAFKA_HEARTBEAT_INTERVAL | | Heartbeat interval |
-| KAFKA_FETCH_MAX_WAIT | | Max broker wait time for fetches |
-| KAFKA_FETCH_MIN_BYTES | | Min bytes broker accumulates before response |
-| KAFKA_FETCH_MAX_BYTES | | Max bytes per fetch response |
-| KAFKA_FETCH_MAX_PARTITION_BYTES | | Max bytes per partition fetch |
-| KAFKA_SHARE_GROUP | | Share group ID |
-| KAFKA_SHARE_MAX_RECORDS | | Max records per share fetch |
-| KAFKA_SHARE_MAX_RECORDS_STRICT | false | Strictly cap records per share fetch |
-| KAFKA_SHARE_REJECT_AFTER_DELIVERIES | | Delivery limit before triggering AckReject |
-| KAFKA_SHARE_RELEASE_TIMEOUT | | Backoff delay before releasing failed records |
+| BROKERS | | Comma-separated seed brokers |
+| SASL_MECHANISM | | PLAIN, SCRAM-SHA-256, or SCRAM-SHA-512 |
+| USER | | SASL username |
+| PASSWORD | | SASL password |
+| REQUEST_TIMEOUT_OVERHEAD | | Request deadline overhead |
+| REQUEST_RETRIES | | Max request retries |
+| RETRY_TIMEOUT | | Total retry time limit |
+| DIAL_TIMEOUT | | Broker dial timeout |
+| CONN_IDLE_TIMEOUT | | Idle connection timeout |
+| METADATA_MAX_AGE | | Max age of cached metadata |
+| METADATA_MIN_AGE | | Min time between metadata refreshes |
+| MAX_WRITE_BYTES | | Max bytes per connection write |
+| MAX_READ_BYTES | | Max bytes per broker response |
+| ALWAYS_RETRY_EOF | false | Retry EOF errors instead of failing connection |
+| DEFAULT_PRODUCE_TOPIC | | Fallback topic if record topic is empty |
+| PRODUCER_BATCH_MAX_BYTES | | Max size of a producer batch |
+| MAX_BUFFERED_RECORDS | | Max buffered records before blocking |
+| MAX_BUFFERED_BYTES | | Max buffered bytes before blocking |
+| PRODUCE_REQUEST_TIMEOUT | | Broker response timeout for produce requests |
+| RECORD_RETRIES | | Max record-level produce retries |
+| RECORD_DELIVERY_TIMEOUT | | Max record buffering time |
+| PRODUCER_LINGER | | Linger delay for batch building |
+| TRANSACTIONAL_ID | | Transactional identifier for EOS |
+| TRANSACTION_TIMEOUT | | Max transaction duration |
+| ENABLED | true | Enable consumer loop |
+| TOPICS | | Comma-separated topics to consume |
+| GROUP | | Consumer group ID |
+| MAX_POLL_RECORDS | 100 | Max records per poll |
+| POLL_INTERVAL | 1s | Interval between polls |
+| SKIP_FATAL_ERRORS | true | Continue on non-retryable fetch errors |
+| SUSPEND_PROCESSING_TIMEOUT | 30s | Backoff delay after handler error |
+| SUSPEND_COMMITTING_TIMEOUT | 10s | Backoff delay after commit/ack error |
+| INSTANCE_ID | | Static group membership ID |
+| CONSUME_REGEX | false | Treat topics as regular expressions |
+| DISABLE_FETCH_SESSIONS | false | Disable fetch sessions |
+| RACK | | Rack ID for rack-aware fetching |
+| MAX_CONCURRENT_FETCHES | | Max concurrent fetches buffered by client |
+| SESSION_TIMEOUT | | Rebalance session timeout |
+| REBALANCE_TIMEOUT | | Max time for members to rejoin |
+| HEARTBEAT_INTERVAL | | Heartbeat interval |
+| FETCH_MAX_WAIT | | Max broker wait time for fetches |
+| FETCH_MIN_BYTES | | Min bytes broker accumulates before response |
+| FETCH_MAX_BYTES | | Max bytes per fetch response |
+| FETCH_MAX_PARTITION_BYTES | | Max bytes per partition fetch |
+| SHARE_GROUP | | Share group ID |
+| SHARE_MAX_RECORDS | | Max records per share fetch |
+| SHARE_MAX_RECORDS_STRICT | false | Strictly cap records per share fetch |
+| SHARE_REJECT_AFTER_DELIVERIES | | Delivery limit before triggering AckReject |
+| SHARE_RELEASE_TIMEOUT | | Backoff delay before releasing failed records |
 
 ## License
 

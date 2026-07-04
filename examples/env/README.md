@@ -13,8 +13,8 @@ This example shows how to load `xkafka.Config` from environment variables using 
 Configure Kafka connection and default produce topic using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
-KAFKA_DEFAULT_PRODUCE_TOPIC=sample-env-topic
+BROKERS=localhost:29092
+DEFAULT_PRODUCE_TOPIC=sample-env-topic
 ```
 
 ## Local Kafka setup

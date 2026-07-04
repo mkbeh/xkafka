@@ -18,14 +18,14 @@ This example shows Kafka-to-Kafka exactly-once processing with `GroupTransactSes
 Configure Kafka connection using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
+BROKERS=localhost:29092
 
-KAFKA_EOS_INPUT_TOPIC=sample-eos-input-topic
-KAFKA_EOS_OUTPUT_TOPIC=sample-eos-output-topic
-KAFKA_EOS_GROUP=sample-eos-group
-KAFKA_EOS_OUTPUT_GROUP=sample-eos-output-group
-KAFKA_EOS_TRANSACTIONAL_ID=sample-eos-session
-KAFKA_EOS_MESSAGES=10
+EOS_INPUT_TOPIC=sample-eos-input-topic
+EOS_OUTPUT_TOPIC=sample-eos-output-topic
+EOS_GROUP=sample-eos-group
+EOS_OUTPUT_GROUP=sample-eos-output-group
+EOS_TRANSACTIONAL_ID=sample-eos-session
+EOS_MESSAGES=10
 ```
 
 ## Local Kafka setup

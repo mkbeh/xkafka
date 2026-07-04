@@ -17,10 +17,10 @@ This example shows how to use `xkafka` with OpenTelemetry tracing.
 Configure Kafka connection and tracing using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
+BROKERS=localhost:29092
 
-KAFKA_TRACING_TOPIC=sample-tracing-topic
-KAFKA_TRACING_GROUP=sample-tracing-group
+TRACING_TOPIC=sample-tracing-topic
+TRACING_GROUP=sample-tracing-group
 
 OTEL_SERVICE_NAME=xkafka-tracing-example
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces

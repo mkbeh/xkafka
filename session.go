@@ -122,16 +122,12 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if !committed {
-			g.cl.logger.Log(kgo.LogLevelInfo, "group transaction aborted before commit",
+			g.cl.logger.Log(kgo.LogLevelDebug, "group transaction aborted before commit",
 				logKeyConsumerLabels, g.cl.labels,
 			)
 
 			return
 		}
-
-		g.cl.logger.Log(kgo.LogLevelDebug, "group transaction committed",
-			logKeyCount, len(records),
-		)
 	}
 }
 

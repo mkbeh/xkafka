@@ -68,138 +68,138 @@ type Config struct {
 	// Brokers sets the seed brokers for the client to use.
 	//
 	// Any seed without a port uses the default Kafka port 9092.
-	Brokers string `env:"KAFKA_BROKERS"`
+	Brokers string
 
 	// SASLMechanism is the SASL mechanism used for authentication.
 	// Supported values: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512.
-	SASLMechanism string `env:"KAFKA_SASL_MECHANISM"`
+	SASLMechanism string
 
 	// User is the SASL username.
-	User string `env:"KAFKA_USER"`
+	User string
 
 	// Password is the SASL password.
-	Password string `env:"KAFKA_PASSWORD"`
+	Password string
 
 	// RequestTimeoutOverhead adds extra time while setting request deadlines.
-	RequestTimeoutOverhead time.Duration `env:"KAFKA_REQUEST_TIMEOUT_OVERHEAD"`
+	RequestTimeoutOverhead time.Duration
 
 	// ConnIdleTimeout controls how long idle broker connections are kept open.
-	ConnIdleTimeout time.Duration `env:"KAFKA_CONN_IDLE_TIMEOUT"`
+	ConnIdleTimeout time.Duration
 
 	// DialTimeout sets the timeout for opening broker connections.
-	DialTimeout time.Duration `env:"KAFKA_DIAL_TIMEOUT"`
+	DialTimeout time.Duration
 
 	// RequestRetries sets how many times retryable requests may be retried.
-	RequestRetries *int `env:"KAFKA_REQUEST_RETRIES"`
+	RequestRetries *int
 
 	// RetryTimeout limits the total time allowed for retrying a request.
-	RetryTimeout time.Duration `env:"KAFKA_RETRY_TIMEOUT"`
+	RetryTimeout time.Duration
 
 	// BrokerMaxWriteBytes limits how many bytes may be written to a broker in one write.
-	BrokerMaxWriteBytes *int32 `env:"KAFKA_MAX_WRITE_BYTES"`
+	BrokerMaxWriteBytes *int32
 
 	// BrokerMaxReadBytes limits the maximum response size read from a broker.
-	BrokerMaxReadBytes *int32 `env:"KAFKA_MAX_READ_BYTES"`
+	BrokerMaxReadBytes *int32
 
 	// MetadataMaxAge sets the maximum age of cached Kafka metadata.
-	MetadataMaxAge time.Duration `env:"KAFKA_METADATA_MAX_AGE"`
+	MetadataMaxAge time.Duration
 
 	// MetadataMinAge sets the minimum time between metadata refreshes.
-	MetadataMinAge time.Duration `env:"KAFKA_METADATA_MIN_AGE"`
+	MetadataMinAge time.Duration
 
 	// AlwaysRetryEOF retries EOF errors instead of treating them as terminal connection failures.
-	AlwaysRetryEOF bool `env:"KAFKA_ALWAYS_RETRY_EOF"`
+	AlwaysRetryEOF bool
 
 	//////////////////////
 	// PRODUCER SECTION //
 	//////////////////////
 
 	// DefaultProduceTopic sets the default topic for records without an explicit topic.
-	DefaultProduceTopic string `env:"KAFKA_DEFAULT_PRODUCE_TOPIC"`
+	DefaultProduceTopic string
 
 	// ProducerBatchMaxBytes limits the maximum size of a produced record batch.
-	ProducerBatchMaxBytes int32 `env:"KAFKA_PRODUCER_BATCH_MAX_BYTES"`
+	ProducerBatchMaxBytes int32
 
 	// MaxBufferedRecords limits how many records the producer may buffer.
-	MaxBufferedRecords int `env:"KAFKA_MAX_BUFFERED_RECORDS"`
+	MaxBufferedRecords int
 
 	// MaxBufferedBytes limits how many bytes the producer may buffer.
-	MaxBufferedBytes int `env:"KAFKA_MAX_BUFFERED_BYTES"`
+	MaxBufferedBytes int
 
 	// ProduceRequestTimeout limits how long brokers may take to respond to produce requests.
-	ProduceRequestTimeout time.Duration `env:"KAFKA_PRODUCE_REQUEST_TIMEOUT"`
+	ProduceRequestTimeout time.Duration
 
 	// RecordRetries sets how many times producing records may be retried.
-	RecordRetries int `env:"KAFKA_RECORD_RETRIES"`
+	RecordRetries int
 
 	// ProducerLinger sets how long records may wait for batching before a produce request is built.
-	ProducerLinger *time.Duration `env:"KAFKA_PRODUCER_LINGER"`
+	ProducerLinger *time.Duration
 
 	// RecordDeliveryTimeout limits how long a record may remain buffered before timing out.
-	RecordDeliveryTimeout time.Duration `env:"KAFKA_RECORD_DELIVERY_TIMEOUT"`
+	RecordDeliveryTimeout time.Duration
 
 	// TransactionalID identifies the transactional producer.
 	//
 	// It is used by producer transactions and group transact sessions.
-	TransactionalID string `env:"KAFKA_TRANSACTIONAL_ID"`
+	TransactionalID string
 
 	// TransactionTimeout limits how long a Kafka transaction may remain open.
-	TransactionTimeout time.Duration `env:"KAFKA_TRANSACTION_TIMEOUT"`
+	TransactionTimeout time.Duration
 
 	//////////////////////
 	// CONSUMER SECTION //
 	//////////////////////
 
 	// ConsumeRegex treats configured topics as regular expressions.
-	ConsumeRegex bool `env:"KAFKA_CONSUME_REGEX"`
+	ConsumeRegex bool
 
 	// Topics contains Kafka topics consumed by the consumer or group transact session.
-	Topics string `env:"KAFKA_TOPICS"`
+	Topics string
 
 	// MaxPollRecords limits how many records are handled in one poll iteration.
-	MaxPollRecords int `env:"KAFKA_MAX_POLL_RECORDS"`
+	MaxPollRecords int
 
 	// FetchMaxWait limits how long a broker may wait before returning a fetch response.
-	FetchMaxWait time.Duration `env:"KAFKA_FETCH_MAX_WAIT"`
+	FetchMaxWait time.Duration
 
 	// FetchMaxBytes limits the maximum bytes returned in one fetch response.
-	FetchMaxBytes int32 `env:"KAFKA_FETCH_MAX_BYTES"`
+	FetchMaxBytes int32
 
 	// FetchMinBytes sets the minimum bytes a broker tries to return in one fetch response.
-	FetchMinBytes int32 `env:"KAFKA_FETCH_MIN_BYTES"`
+	FetchMinBytes int32
 
 	// FetchMaxPartitionBytes limits how many bytes may be fetched from one partition.
-	FetchMaxPartitionBytes int32 `env:"KAFKA_FETCH_MAX_PARTITION_BYTES"`
+	FetchMaxPartitionBytes int32
 
 	// DisableFetchSessions disables Kafka fetch sessions.
-	DisableFetchSessions bool `env:"KAFKA_DISABLE_FETCH_SESSIONS"`
+	DisableFetchSessions bool
 
 	// Rack identifies the client rack for rack-aware fetching and consumer assignment.
-	Rack string `env:"KAFKA_RACK"`
+	Rack string
 
 	// MaxConcurrentFetches limits how many fetch requests may be in flight or buffered at once.
 	//
 	// It can be used together with FetchMaxBytes to bound consumer memory usage.
-	MaxConcurrentFetches *int `env:"KAFKA_MAX_CONCURRENT_FETCHES"`
+	MaxConcurrentFetches *int
 
 	////////////////////////////
 	// CONSUMER GROUP SECTION //
 	////////////////////////////
 
 	// Group identifies the Kafka consumer group.
-	Group string `env:"KAFKA_GROUP"`
+	Group string
 
 	// InstanceID sets a static consumer group member ID.
-	InstanceID string `env:"KAFKA_INSTANCE_ID"`
+	InstanceID string
 
 	// SessionTimeout controls how long a group member may go without heartbeating.
-	SessionTimeout time.Duration `env:"KAFKA_SESSION_TIMEOUT"`
+	SessionTimeout time.Duration
 
 	// RebalanceTimeout controls how long group members may take during a rebalance.
-	RebalanceTimeout time.Duration `env:"KAFKA_REBALANCE_TIMEOUT"`
+	RebalanceTimeout time.Duration
 
 	// HeartbeatInterval controls how often a group member sends heartbeats.
-	HeartbeatInterval time.Duration `env:"KAFKA_HEARTBEAT_INTERVAL"`
+	HeartbeatInterval time.Duration
 
 	/////////////////////////
 	// SHARE GROUP SECTION //
@@ -208,44 +208,44 @@ type Config struct {
 	// ShareGroup identifies the Kafka share group.
 	//
 	// If set, share group consuming is used instead of a regular consumer group.
-	ShareGroup string `env:"KAFKA_SHARE_GROUP"`
+	ShareGroup string
 
 	// ShareMaxRecords limits how many records ShareFetch may return.
 	//
 	// If zero, the franz-go default is used.
-	ShareMaxRecords int32 `env:"KAFKA_SHARE_MAX_RECORDS"`
+	ShareMaxRecords int32
 
 	// ShareMaxRecordsStrict asks the broker to strictly cap records per ShareFetch.
-	ShareMaxRecordsStrict bool `env:"KAFKA_SHARE_MAX_RECORDS_STRICT"`
+	ShareMaxRecordsStrict bool
 
 	// ShareRejectAfterDeliveries controls when failed share group records are rejected.
 	//
 	// If zero, failed records are released for redelivery.
-	ShareRejectAfterDeliveries int32 `env:"KAFKA_SHARE_REJECT_AFTER_DELIVERIES"`
+	ShareRejectAfterDeliveries int32
 
 	// ShareReleaseTimeout delays AckRelease after share handler errors.
 	//
 	// If zero, failed records are released immediately.
-	ShareReleaseTimeout time.Duration `env:"KAFKA_SHARE_RELEASE_TIMEOUT"`
+	ShareReleaseTimeout time.Duration
 
 	/////////////////////
 	// SERVICE SECTION //
 	/////////////////////
 
 	// Enabled enables this Kafka component.
-	Enabled bool `env:"KAFKA_ENABLED"`
+	Enabled bool
 
 	// SkipFatalErrors allows the consumer to continue after non-retriable fetch errors.
-	SkipFatalErrors bool `env:"KAFKA_SKIP_FATAL_ERRORS"`
+	SkipFatalErrors bool
 
 	// PollInterval sets the interval between consumer poll iterations.
-	PollInterval time.Duration `env:"KAFKA_POLL_INTERVAL"`
+	PollInterval time.Duration
 
 	// SuspendProcessingTimeout sets the wait time after handler errors.
-	SuspendProcessingTimeout time.Duration `env:"KAFKA_SUSPEND_PROCESSING_TIMEOUT"`
+	SuspendProcessingTimeout time.Duration
 
 	// SuspendCommittingTimeout sets the wait time after offset commit or ack errors.
-	SuspendCommittingTimeout time.Duration `env:"KAFKA_SUSPEND_COMMITTING_TIMEOUT"`
+	SuspendCommittingTimeout time.Duration
 }
 
 ////////////////////////////////////////////////////////

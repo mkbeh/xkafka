@@ -33,14 +33,14 @@ var (
 )
 
 func init() {
-	brokers = os.Getenv("KAFKA_BROKERS")
+	brokers = os.Getenv("BROKERS")
 
-	inputTopic = getenv("KAFKA_EOS_INPUT_TOPIC", "sample-eos-input-topic")
-	outputTopic = getenv("KAFKA_EOS_OUTPUT_TOPIC", "sample-eos-output-topic")
-	group = getenv("KAFKA_EOS_GROUP", "sample-eos-group")
-	outputGroup = getenv("KAFKA_EOS_OUTPUT_GROUP", "sample-eos-output-group")
-	transactionalID = getenv("KAFKA_EOS_TRANSACTIONAL_ID", "sample-eos-session")
-	messagesCount = getenvInt("KAFKA_EOS_MESSAGES", defaultMessagesCount)
+	inputTopic = getenv("EOS_INPUT_TOPIC", "sample-eos-input-topic")
+	outputTopic = getenv("EOS_OUTPUT_TOPIC", "sample-eos-output-topic")
+	group = getenv("EOS_GROUP", "sample-eos-group")
+	outputGroup = getenv("EOS_OUTPUT_GROUP", "sample-eos-output-group")
+	transactionalID = getenv("EOS_TRANSACTIONAL_ID", "sample-eos-session")
+	messagesCount = getenvInt("EOS_MESSAGES", defaultMessagesCount)
 }
 
 type InputMessage struct {

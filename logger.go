@@ -11,7 +11,6 @@ const (
 	logKeyTopic          = "topic"
 	logKeyRecord         = "record"
 	logKeyRecords        = "records"
-	logKeyCount          = "count"
 	logKeyConsumerLabels = "consumer_labels"
 )
 
