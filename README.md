@@ -278,9 +278,7 @@ orders_kafka_transaction_duration_seconds
 `Config` can be initialized directly as a Go struct or populated from environment variables by your application
 configuration layer.
 
-`Config` uses `env` tags and can be loaded with [caarlos0/env](https://github.com/caarlos0/env).
-See [examples/env](examples/env).
-
+For a complete example of environment-based configuration, see [examples/env](examples/env).
 ### Environment variables
 
 | Variable | Default | Description |
