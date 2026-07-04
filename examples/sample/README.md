@@ -13,9 +13,9 @@ This example shows how to use `xkafka` in a simple REST API service.
 Configure Kafka connection using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
-KAFKA_TOPICS=sample-topic
-KAFKA_GROUP=sample-group
+BROKERS=localhost:29092
+TOPICS=sample-topic
+GROUP=sample-group
 ```
 
 ## Local Kafka setup

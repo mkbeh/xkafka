@@ -144,7 +144,7 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		fetches := c.conn.PollRecords(ctx, c.batchSize)
 		if fetches.IsClientClosed() {
-			c.logger.Log(kgo.LogLevelInfo, "kafka client closed for topic(s)", logKeyConsumerLabels, c.labels)
+			c.logger.Log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerLabels, c.labels)
 			return nil
 		}
 

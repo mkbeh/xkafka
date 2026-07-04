@@ -27,10 +27,10 @@ var (
 )
 
 func init() {
-	brokers = os.Getenv("KAFKA_BROKERS")
-	topic = getenv("KAFKA_TX_TOPIC", "sample-tx-topic")
-	group = getenv("KAFKA_TX_GROUP", "sample-tx-group")
-	transactionalID = getenv("KAFKA_TRANSACTIONAL_ID", "sample-tx-producer")
+	brokers = os.Getenv("BROKERS")
+	topic = getenv("TX_TOPIC", "sample-tx-topic")
+	group = getenv("TX_GROUP", "sample-tx-group")
+	transactionalID = getenv("TRANSACTIONAL_ID", "sample-tx-producer")
 }
 
 type Message struct {

@@ -39,10 +39,10 @@ var (
 )
 
 func init() {
-	brokers = os.Getenv("KAFKA_BROKERS")
+	brokers = os.Getenv("BROKERS")
 
-	topic = getenv("KAFKA_TRACING_TOPIC", "sample-tracing-topic")
-	group = getenv("KAFKA_TRACING_GROUP", "sample-tracing-group")
+	topic = getenv("TRACING_TOPIC", "sample-tracing-topic")
+	group = getenv("TRACING_GROUP", "sample-tracing-group")
 
 	serviceName = getenv("OTEL_SERVICE_NAME", "xkafka-tracing-example")
 	tracesEndpoint = getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces")

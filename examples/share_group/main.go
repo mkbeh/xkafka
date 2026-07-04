@@ -42,17 +42,17 @@ var (
 )
 
 func init() {
-	brokers = os.Getenv("KAFKA_BROKERS")
+	brokers = os.Getenv("BROKERS")
 
-	topic = getenv("KAFKA_SHARE_TOPIC", "sample-share-topic")
-	group = getenv("KAFKA_SHARE_GROUP", "sample-share-group")
-	consumersCount = int(getenvInt32("KAFKA_SHARE_CONSUMERS", defaultConsumersCount))
-	messagesCount = int(getenvInt32("KAFKA_SHARE_MESSAGES", defaultMessagesCount))
-	maxRecords = getenvInt32("KAFKA_SHARE_MAX_RECORDS", defaultMaxRecords)
+	topic = getenv("SHARE_TOPIC", "sample-share-topic")
+	group = getenv("SHARE_GROUP", "sample-share-group")
+	consumersCount = int(getenvInt32("SHARE_CONSUMERS", defaultConsumersCount))
+	messagesCount = int(getenvInt32("SHARE_MESSAGES", defaultMessagesCount))
+	maxRecords = getenvInt32("SHARE_MAX_RECORDS", defaultMaxRecords)
 
-	releaseTimeout = getenvDuration("KAFKA_SHARE_RELEASE_TIMEOUT", defaultReleaseTimeout)
+	releaseTimeout = getenvDuration("SHARE_RELEASE_TIMEOUT", defaultReleaseTimeout)
 	rejectAfterDeliveries = getenvInt32(
-		"KAFKA_SHARE_REJECT_AFTER_DELIVERIES",
+		"SHARE_REJECT_AFTER_DELIVERIES",
 		defaultRejectAfterDeliveries,
 	)
 }

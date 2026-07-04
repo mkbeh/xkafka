@@ -13,17 +13,17 @@ import (
 func main() {
 	ctx := context.Background()
 
-	cfg, err := env.ParseAs[xkafka.Config]()
+	cfg, err := env.ParseAsWithOptions[xkafka.Config](env.Options{UseFieldNameByDefault: true})
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	if cfg.Brokers == "" {
-		log.Fatalln("KAFKA_BROKERS is required")
+		log.Fatalln("BROKERS is required")
 	}
 
 	if cfg.DefaultProduceTopic == "" {
-		log.Fatalln("KAFKA_DEFAULT_PRODUCE_TOPIC is required")
+		log.Fatalln("DEFAULT_PRODUCE_TOPIC is required")
 	}
 
 	client, err := xkafka.NewClient(

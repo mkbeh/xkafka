@@ -16,10 +16,10 @@ This example shows how to use `xkafka` producer transactions.
 Configure Kafka connection using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
-KAFKA_TX_TOPIC=sample-tx-topic
-KAFKA_TX_GROUP=sample-tx-group
-KAFKA_TRANSACTIONAL_ID=sample-tx-producer
+BROKERS=localhost:29092
+TX_TOPIC=sample-tx-topic
+TX_GROUP=sample-tx-group
+TRANSACTIONAL_ID=sample-tx-producer
 ```
 
 ## Local Kafka setup

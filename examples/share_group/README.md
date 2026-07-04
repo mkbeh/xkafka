@@ -17,19 +17,19 @@ This example shows how to use `xkafka` with Kafka Share Groups.
 Configure Kafka connection using environment variables:
 
 ```text
-KAFKA_BROKERS=localhost:29092
+BROKERS=localhost:29092
 
-KAFKA_SHARE_TOPIC=sample-share-topic
-KAFKA_SHARE_GROUP=sample-share-group
-KAFKA_SHARE_CONSUMERS=4
-KAFKA_SHARE_MESSAGES=30
-KAFKA_SHARE_MAX_RECORDS=5
+SHARE_TOPIC=sample-share-topic
+SHARE_GROUP=sample-share-group
+SHARE_CONSUMERS=4
+SHARE_MESSAGES=30
+SHARE_MAX_RECORDS=5
 
-KAFKA_SHARE_REJECT_AFTER_DELIVERIES=3
-KAFKA_SHARE_RELEASE_TIMEOUT=2s
+SHARE_REJECT_AFTER_DELIVERIES=3
+SHARE_RELEASE_TIMEOUT=2s
 ```
 
-`KAFKA_SHARE_MAX_RECORDS` controls the batch size. Set it to `1` to get single-record style processing through the same
+`SHARE_MAX_RECORDS` controls the batch size. Set it to `1` to get single-record style processing through the same
 batch handler API.
 
 ## Local Kafka setup

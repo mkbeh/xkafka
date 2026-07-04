@@ -23,9 +23,9 @@ var (
 )
 
 func init() {
-	brokers = os.Getenv("KAFKA_BROKERS")
-	topic = os.Getenv("KAFKA_TOPICS")
-	group = os.Getenv("KAFKA_GROUP")
+	brokers = os.Getenv("BROKERS")
+	topic = os.Getenv("TOPICS")
+	group = os.Getenv("GROUP")
 }
 
 type Message struct {
