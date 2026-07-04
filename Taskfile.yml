@@ -20,6 +20,12 @@ tasks:
       - task: lint-root
       - task: test-root
 
+  before-commit:
+    desc: "Run example checks and full cycle"
+    cmds:
+      - task: check-examples
+      - task: run
+
   lint:
     desc: "Lint root module"
     cmds:
@@ -31,6 +37,26 @@ tasks:
     cmds:
       - task: vendor-root
       - task: test-root
+
+  check-examples:
+    desc: "Check example modules"
+    cmds:
+      - |
+        set -e
+
+        find ./examples -name go.mod -print | sort | while IFS= read -r mod; do
+          dir="$(dirname "$mod")"
+          echo "==> $dir"
+
+          (
+            cd "$dir"
+            rm -rf vendor
+            go get ./...
+            go mod tidy -v
+            go mod vendor
+            go test ./...
+          )
+        done
 
   vendor-root:
     desc: "Vendor root module"
