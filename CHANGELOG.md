@@ -19,7 +19,6 @@ Initial maintained release of `xkafka`.
 * **OpenTelemetry tracing** with backend-agnostic `TracerProvider` and `TextMapPropagator`.
 * **Prometheus** wrapper-level metrics.
 * Shared **`Config`** structure for producer, consumer, Share Group, and transaction workflows.
-* Environment variable tags for **`Config`**.
 * Runnable examples for producing, consuming, transactions, EOS, Share Groups, and env-based configuration.
 * README documentation for core features, configuration, metrics, and examples.
 
