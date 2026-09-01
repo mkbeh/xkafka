@@ -80,6 +80,7 @@ services:
         
         TOPICS=(
           "sample-topic"
+          "sample-otel-topic"
           "sample-tx-topic"
           "sample-share-topic"
           "sample-eos-input-topic"

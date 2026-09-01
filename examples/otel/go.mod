@@ -1,0 +1,13 @@
+module otel
+
+go 1.27
+
+require (
+	github.com/mkbeh/xkafka v0.5.0
+	github.com/mkbeh/xkafka/extra/otelxkafka v0.5.0
+	github.com/prometheus/client_golang v1.24.1
+	github.com/twmb/franz-go v1.21.6
+	github.com/twmb/franz-go/plugin/kprom v1.5.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.68.0
+	go.opentelemetry.io/otel/sdk/metric v1.46.0
+)
