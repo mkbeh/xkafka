@@ -131,14 +131,13 @@ func main() {
 	client, err = xkafka.NewClient(
 		xkafka.WithName("otel"),
 		xkafka.WithMetrics(metrics),
-		xkafka.WithHooks(kafkaMetrics),
-		xkafka.WithConfig(&xkafka.Config{
-			Enabled:             true,
-			Brokers:             brokers,
-			DefaultProduceTopic: topic,
-			Topics:              topic,
-			Group:               group,
-		}),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.DefaultProduceTopic(topic),
+			kgo.ConsumeTopics(topic),
+			kgo.ConsumerGroup(group),
+			kgo.WithHooks(kafkaMetrics),
+		),
 		xkafka.WithConsumerBatchHandler(handleRecords),
 	)
 	if err != nil {
