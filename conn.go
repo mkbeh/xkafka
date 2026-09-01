@@ -50,8 +50,6 @@ type client struct {
 	manualCommit   bool
 	maxPollRecords int
 
-	skipFatalErrors bool
-
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
 	suspendCommittingTimeout time.Duration
@@ -71,8 +69,7 @@ func newClient(opts ...Opt) (*client, error) {
 	c := &client{
 		logger: newDefaultLogger(),
 
-		maxPollRecords:  100,
-		skipFatalErrors: true,
+		maxPollRecords: 100,
 
 		pollInterval:             time.Second,
 		suspendProcessingTimeout: time.Second * 30,
@@ -99,7 +96,6 @@ func newClient(opts ...Opt) (*client, error) {
 	c.kafkaOpts = append(c.kafkaOpts,
 		kgo.WithLogger(c.logger),
 		kgo.WithHooks(tracer),
-		kgo.KeepRetryableFetchErrors(),
 	)
 
 	return c, nil
@@ -152,20 +148,51 @@ func (c *client) HandleFetches(ctx context.Context) error {
 			return nil
 		}
 
-		for _, fetchErr := range fetches.Errors() {
-			c.stats.recordFetchError()
-			c.logger.Log(kgo.LogLevelError, "error fetching records",
-				logKeyError, fetchErr.Err,
-				logKeyTopic, fetchErr.Topic,
-			)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 
-			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
-				return fetchErr.Err
-			}
+		if err := c.handleFetchErrors(fetches); err != nil {
+			return err
 		}
 
 		c.handleFetches(ctx, fetches)
 	}
+}
+
+func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
+	var firstErr error
+	var firstTopic string
+	var firstPartition int32
+
+	fetches.EachError(func(topic string, partition int32, err error) {
+		c.stats.recordFetchError()
+
+		if isRecoverableFetchError(err) {
+			c.logger.Log(kgo.LogLevelWarn, "recoverable error fetching records",
+				logKeyError, err,
+				logKeyTopic, topic,
+			)
+			return
+		}
+
+		c.logger.Log(kgo.LogLevelError, "error fetching records",
+			logKeyError, err,
+			logKeyTopic, topic,
+		)
+
+		if firstErr == nil {
+			firstErr = err
+			firstTopic = topic
+			firstPartition = partition
+		}
+	})
+
+	if firstErr == nil {
+		return nil
+	}
+
+	return fmt.Errorf("kafka: fetch topic %q partition %d: %w", firstTopic, firstPartition, firstErr)
 }
 
 func (c *client) applyKafkaOptions(conn *kgo.Client) {
@@ -279,4 +306,20 @@ func (c *client) formatRecords(records ...*kgo.Record) string {
 
 func newFormatter() (*kgo.RecordFormatter, error) {
 	return kgo.NewRecordFormatter("topic: %t, key: %k, msg: %v")
+}
+
+func isRecoverableFetchError(err error) bool {
+	if kerr.IsRetriable(err) {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrDataLoss](err); ok {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrGroupSession](err); ok {
+		return true
+	}
+
+	return false
 }

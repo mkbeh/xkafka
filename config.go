@@ -161,13 +161,6 @@ func WithMaxPollRecords(maxPollRecords int) Opt {
 	}}
 }
 
-// WithSkipFatalErrors controls whether non-retriable fetch errors are skipped.
-func WithSkipFatalErrors(skip bool) Opt {
-	return clientOpt{fn: func(c *client) {
-		c.skipFatalErrors = skip
-	}}
-}
-
 // WithPollInterval sets the interval between consumer poll iterations.
 func WithPollInterval(interval time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
