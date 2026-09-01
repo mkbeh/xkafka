@@ -39,16 +39,17 @@ type client struct {
 	labels  map[string]string
 	metrics Metrics
 
-	enabled     bool
 	promiseFunc PromiseFunc
 
 	handleFetches       handleFetchesFunc
 	clientHandleFetches func(*Client) handleFetchesFunc
 	groupHandleFetches  func(*GroupTransactSession) handleFetchesFunc
 
-	consumerGroup   string
-	groupSpecified  bool
-	batchSize       int
+	consumerGroup  string
+	shareGroup     string
+	manualCommit   bool
+	maxPollRecords int
+
 	skipFatalErrors bool
 
 	pollInterval             time.Duration
@@ -58,7 +59,7 @@ type client struct {
 	shareRejectAfterDeliveries int32
 	shareReleaseTimeout        time.Duration
 
-	clientOps  []kgo.Opt
+	kafkaOpts  []kgo.Opt
 	tracerOpts []kotel.TracerOpt
 
 	stats statsCollector
@@ -70,9 +71,7 @@ func newClient(opts ...Opt) (*client, error) {
 	c := &client{
 		logger: newDefaultLogger(),
 
-		enabled: true,
-
-		batchSize:       100,
+		maxPollRecords:  100,
 		skipFatalErrors: true,
 
 		pollInterval:             time.Second,
@@ -97,7 +96,7 @@ func newClient(opts ...Opt) (*client, error) {
 
 	tracer := kotel.NewTracer(c.tracerOpts...)
 
-	c.clientOps = append(c.clientOps,
+	c.kafkaOpts = append(c.kafkaOpts,
 		kgo.WithLogger(c.logger),
 		kgo.WithHooks(tracer),
 		kgo.KeepRetryableFetchErrors(),
@@ -127,10 +126,6 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 }
 
 func (c *client) HandleFetches(ctx context.Context) error {
-	if !c.enabled {
-		return nil
-	}
-
 	if c.conn == nil {
 		return errors.New("kafka: conn is nil")
 	}
@@ -151,7 +146,7 @@ func (c *client) HandleFetches(ctx context.Context) error {
 		case <-pollTicker.C:
 		}
 
-		fetches := c.conn.PollRecords(ctx, c.batchSize)
+		fetches := c.conn.PollRecords(ctx, c.maxPollRecords)
 		if fetches.IsClientClosed() {
 			c.logger.Log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerGroup, c.consumerGroup)
 			return nil
@@ -170,6 +165,15 @@ func (c *client) HandleFetches(ctx context.Context) error {
 		}
 
 		c.handleFetches(ctx, fetches)
+	}
+}
+
+func (c *client) applyKafkaOptions(conn *kgo.Client) {
+	c.consumerGroup, _ = conn.OptValue(kgo.ConsumerGroup).(string)
+	c.shareGroup, _ = conn.OptValue(kgo.ShareGroup).(string)
+
+	if c.consumerGroup != "" {
+		c.manualCommit, _ = conn.OptValue(kgo.DisableAutoCommit).(bool)
 	}
 }
 
@@ -214,7 +218,7 @@ func (c *client) applyName() {
 		return
 	}
 
-	c.clientOps = append(c.clientOps, kgo.ClientID(c.name))
+	c.kafkaOpts = append(c.kafkaOpts, kgo.ClientID(c.name))
 	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.name))
 }
 

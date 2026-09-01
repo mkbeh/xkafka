@@ -25,12 +25,13 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 		return nil, err
 	}
 
-	conn, err := kgo.NewGroupTransactSession(cl.clientOps...)
+	conn, err := kgo.NewGroupTransactSession(cl.kafkaOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create group transact session: %w", err)
 	}
 
 	cl.conn = conn
+	cl.applyKafkaOptions(conn.Client())
 
 	g := &GroupTransactSession{
 		conn: conn,

@@ -24,12 +24,13 @@ func NewClient(opts ...Opt) (*Client, error) {
 		return nil, err
 	}
 
-	conn, err := kgo.NewClient(cl.clientOps...)
+	conn, err := kgo.NewClient(cl.kafkaOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create client: %w", err)
 	}
 
 	cl.conn = conn
+	cl.applyKafkaOptions(conn)
 
 	c := &Client{
 		conn: conn,
@@ -282,7 +283,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 }
 
 func (c *Client) commitInternalOffsetsEternal(ctx context.Context) {
-	if !c.cl.groupSpecified {
+	if !c.cl.manualCommit {
 		return
 	}
 
