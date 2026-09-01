@@ -177,6 +177,26 @@ func (c *client) applyKafkaOptions(conn *kgo.Client) {
 	}
 }
 
+func (c *client) Client() *kgo.Client {
+	switch conn := c.conn.(type) {
+	case *kgo.Client:
+		return conn
+	case *kgo.GroupTransactSession:
+		return conn.Client()
+	default:
+		panic("kafka: unsupported connection")
+	}
+}
+
+func (c *client) Session() *kgo.GroupTransactSession {
+	conn, ok := c.conn.(*kgo.GroupTransactSession)
+	if !ok {
+		panic("kafka: group transact session connection expected")
+	}
+
+	return conn
+}
+
 // Close stops the polling loop and is safe to call multiple times.
 func (c *client) Close() {
 	if c.exitCh != nil {

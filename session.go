@@ -14,7 +14,6 @@ import (
 // offsets and produced records must be committed atomically.
 type GroupTransactSession struct {
 	cl      *client
-	conn    *kgo.GroupTransactSession
 	metrics MetricsRegistration
 }
 
@@ -34,8 +33,7 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	cl.applyKafkaOptions(conn.Client())
 
 	g := &GroupTransactSession{
-		conn: conn,
-		cl:   cl,
+		cl: cl,
 	}
 
 	// Bind the fetch handler after GroupTransactSession is created because the adapter
@@ -80,11 +78,11 @@ func (g *GroupTransactSession) Labels() map[string]string {
 }
 
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
-	if g == nil || g.conn == nil {
+	if g == nil || g.cl == nil || g.cl.conn == nil {
 		return fmt.Errorf("kafka: group transact session is nil")
 	}
 
-	if err := g.conn.Client().Ping(ctx); err != nil {
+	if err := g.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping group transact session: %w", err)
 	}
 
@@ -118,16 +116,18 @@ func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
 
 // Shutdown stops polling and closes the group transaction session.
 func (g *GroupTransactSession) Shutdown(_ context.Context) error {
-	if g.cl != nil {
-		g.cl.Close()
+	if g.cl == nil {
+		return nil
 	}
+
+	g.cl.Close()
 
 	if g.metrics != nil {
 		g.metrics.Close()
 	}
 
-	if g.conn != nil {
-		g.conn.Close()
+	if g.cl.conn != nil {
+		g.cl.Session().Close()
 	}
 
 	return nil
@@ -191,13 +191,14 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	records []*kgo.Record,
 	handler BatchTxHandlerFunc,
 ) (committed bool, handleErr, txErr error) {
+	conn := g.cl.Session()
 	transactionStart := time.Now()
 
 	defer func() {
 		g.cl.stats.recordGroupTransaction(committed, txErr, time.Since(transactionStart))
 	}()
 
-	if err := g.conn.Begin(); err != nil {
+	if err := conn.Begin(); err != nil {
 		return false, nil, fmt.Errorf("kafka: begin group transaction: %w", err)
 	}
 
@@ -206,7 +207,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	defer func() {
 		if r := recover(); r != nil {
 			handleErr = fmt.Errorf("kafka: batch handler panic: %v", r)
-			committed, txErr = g.conn.End(ctx, kgo.TryAbort)
+			committed, txErr = conn.End(ctx, kgo.TryAbort)
 		}
 
 		g.cl.stats.recordHandle(len(records), time.Since(handleStart), handleErr)
@@ -221,7 +222,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 		endTry = kgo.TryAbort
 	}
 
-	committed, err := g.conn.End(ctx, endTry)
+	committed, err := conn.End(ctx, endTry)
 	if err != nil {
 		return false, handleErr, fmt.Errorf("kafka: end group transaction: %w", err)
 	}

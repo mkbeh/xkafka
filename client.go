@@ -13,7 +13,6 @@ import (
 // Client provides Kafka produce and consume operations.
 type Client struct {
 	cl      *client
-	conn    *kgo.Client
 	metrics MetricsRegistration
 }
 
@@ -33,8 +32,7 @@ func NewClient(opts ...Opt) (*Client, error) {
 	cl.applyKafkaOptions(conn)
 
 	c := &Client{
-		conn: conn,
-		cl:   cl,
+		cl: cl,
 	}
 
 	// Bind the fetch handler after Client is created because the adapter needs
@@ -79,11 +77,11 @@ func (c *Client) Labels() map[string]string {
 }
 
 func (c *Client) Ping(ctx context.Context) error {
-	if c == nil || c.conn == nil {
+	if c == nil || c.cl == nil || c.cl.conn == nil {
 		return fmt.Errorf("kafka: client is nil")
 	}
 
-	if err := c.conn.Ping(ctx); err != nil {
+	if err := c.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping client: %w", err)
 	}
 
@@ -131,7 +129,9 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		return fmt.Errorf("kafka: transaction function is nil")
 	}
 
-	if err = c.conn.BeginTransaction(); err != nil {
+	conn := c.cl.Client()
+
+	if err = conn.BeginTransaction(); err != nil {
 		return fmt.Errorf("kafka: begin transaction: %w", err)
 	}
 
@@ -173,7 +173,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		return err
 	}
 
-	if err = c.conn.Flush(ctx); err != nil {
+	if err = conn.Flush(ctx); err != nil {
 		return fmt.Errorf("kafka: flush buffered records: %w", err)
 	}
 
@@ -182,7 +182,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	// franz-go allows TryAbort only for specific transaction errors.
 	shouldAbort = false
 
-	if err = c.conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
+	if err = conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
 		if errors.Is(err, kerr.OperationNotAttempted) || errors.Is(err, kerr.TransactionAbortable) {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
 				return fmt.Errorf("kafka: commit failed: %w; abort also failed: %v", err, abortErr)
@@ -203,18 +203,20 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 func (c *Client) Shutdown(ctx context.Context) error {
 	c.cl.Close()
 
-	if c.conn == nil {
+	if c.cl.conn == nil {
 		return nil
 	}
 
+	conn := c.cl.Client()
+
 	var err error
 
-	if flushErr := c.conn.Flush(ctx); flushErr != nil {
+	if flushErr := conn.Flush(ctx); flushErr != nil {
 		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
-	if flushErr := c.conn.FlushAcks(ctx); flushErr != nil {
+	if flushErr := conn.FlushAcks(ctx); flushErr != nil {
 		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
@@ -223,7 +225,7 @@ func (c *Client) Shutdown(ctx context.Context) error {
 		c.metrics.Close()
 	}
 
-	c.conn.Close()
+	conn.Close()
 
 	return err
 }
@@ -243,14 +245,16 @@ func (c *Client) registerMetrics(metrics Metrics) error {
 }
 
 func (c *Client) abortTransaction(ctx context.Context) error {
+	conn := c.cl.Client()
+
 	// AbortBufferedRecords is required before aborting a transaction so that
 	// buffered records are not accidentally carried into the next transaction.
-	if err := c.conn.AbortBufferedRecords(ctx); err != nil {
+	if err := conn.AbortBufferedRecords(ctx); err != nil {
 		c.cl.logger.Log(kgo.LogLevelError, "error aborting buffered records", logKeyError, err)
 		return fmt.Errorf("abort buffered records: %w", err)
 	}
 
-	if err := c.conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
+	if err := conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
 		c.cl.logger.Log(kgo.LogLevelError, "error rolling back transaction", logKeyError, err)
 		return fmt.Errorf("abort transaction: %w", err)
 	}
@@ -287,13 +291,15 @@ func (c *Client) commitInternalOffsetsEternal(ctx context.Context) {
 		return
 	}
 
+	conn := c.cl.Client()
+
 infiniteLoop:
 	for {
 		select {
 		case <-c.cl.exitCh:
 			return
 		default:
-			if err := c.conn.CommitUncommittedOffsets(ctx); err != nil {
+			if err := conn.CommitUncommittedOffsets(ctx); err != nil {
 				c.cl.stats.recordOffsetCommitError()
 				c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
@@ -357,12 +363,14 @@ func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, i
 }
 
 func (c *Client) flushAcksEternal(ctx context.Context) {
+	conn := c.cl.Client()
+
 	for {
 		select {
 		case <-c.cl.exitCh:
 			return
 		default:
-			if err := c.conn.FlushAcks(ctx); err != nil {
+			if err := conn.FlushAcks(ctx); err != nil {
 				c.cl.stats.recordShareAckError()
 				c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
