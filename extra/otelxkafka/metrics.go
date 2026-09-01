@@ -342,7 +342,7 @@ func newClientMetricAttributes(name string, labels map[string]string) attribute.
 	return attribute.NewSet(attributes...)
 }
 
-func (instruments clientMetricInstruments) observe(
+func (instruments *clientMetricInstruments) observe(
 	observer metric.Observer,
 	stats xkafka.Stats,
 	option metric.ObserveOption,
