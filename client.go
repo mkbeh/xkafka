@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mkbeh/xkafka/internal/kprom"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 // Client provides Kafka produce and consume operations.
 type Client struct {
-	conn *kgo.Client
-	cl   *client
+	cl      *client
+	conn    *kgo.Client
+	metrics MetricsRegistration
 }
 
 // NewClient creates a Kafka client with the provided options.
@@ -42,7 +42,39 @@ func NewClient(opts ...Opt) (*Client, error) {
 		cl.handleFetches = cl.clientHandleFetches(c)
 	}
 
+	if err := c.registerMetrics(cl.metrics); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("kafka: register client metrics: %w", err)
+	}
+
 	return c, nil
+}
+
+// Name returns the logical client name configured with WithName.
+func (c *Client) Name() string {
+	if c == nil || c.cl == nil {
+		return ""
+	}
+
+	return c.cl.Name()
+}
+
+// Label returns one client label without allocating a copy of all labels.
+func (c *Client) Label(key string) (string, bool) {
+	if c == nil || c.cl == nil {
+		return "", false
+	}
+
+	return c.cl.Label(key)
+}
+
+// Labels returns a detached copy of the client labels.
+func (c *Client) Labels() map[string]string {
+	if c == nil || c.cl == nil {
+		return nil
+	}
+
+	return c.cl.Labels()
 }
 
 func (c *Client) Ping(ctx context.Context) error {
@@ -55,6 +87,15 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// Stats returns a snapshot of the current client statistics.
+func (c *Client) Stats() Stats {
+	if c == nil || c.cl == nil {
+		return Stats{}
+	}
+
+	return c.cl.stats.snapshot()
 }
 
 func (c *Client) HandleFetches(ctx context.Context) error {
@@ -79,12 +120,10 @@ func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 // Panics are recovered only long enough to abort the transaction, then re-thrown.
 func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	startTime := time.Now()
-	txOutcome := kprom.TransactionOutcomeError
+	outcome := transactionOutcomeError
 
 	defer func() {
-		if c.cl.producerMetrics != nil {
-			c.cl.producerMetrics.CollectTransaction(startTime, txOutcome)
-		}
+		c.cl.stats.recordTransaction(outcome, time.Since(startTime))
 	}()
 
 	if fn == nil {
@@ -106,6 +145,8 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 					c.cl.logger.Log(kgo.LogLevelError, "kafka transaction abort after panic failed",
 						logKeyError, abortErr,
 					)
+				} else {
+					outcome = transactionOutcomeAbort
 				}
 			}
 
@@ -119,6 +160,8 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		if shouldAbort && err != nil {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
 				err = fmt.Errorf("kafka: transaction failed: %w; abort failed: %v", err, abortErr)
+			} else {
+				outcome = transactionOutcomeAbort
 			}
 		}
 	}()
@@ -144,13 +187,14 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 				return fmt.Errorf("kafka: commit failed: %w; abort also failed: %v", err, abortErr)
 			}
 
+			outcome = transactionOutcomeAbort
 			return fmt.Errorf("kafka: commit failed, transaction aborted: %w", err)
 		}
 
 		return fmt.Errorf("kafka: commit transaction: %w", err)
 	}
 
-	txOutcome = kprom.TransactionOutcomeCommit
+	outcome = transactionOutcomeCommit
 	return nil
 }
 
@@ -174,9 +218,27 @@ func (c *Client) Shutdown(ctx context.Context) error {
 		err = errors.Join(err, flushErr)
 	}
 
+	if c.metrics != nil {
+		c.metrics.Close()
+	}
+
 	c.conn.Close()
 
 	return err
+}
+
+func (c *Client) registerMetrics(metrics Metrics) error {
+	if metrics == nil {
+		return nil
+	}
+
+	registration, err := metrics.Register(c)
+	if err != nil {
+		return err
+	}
+
+	c.metrics = registration
+	return nil
 }
 
 func (c *Client) abortTransaction(ctx context.Context) error {
@@ -201,12 +263,6 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 		if len(records) == 0 {
 			return
 		}
-
-		defer func(startTime time.Time) {
-			for _, r := range records {
-				c.cl.consumerMetrics.CollectHandleProcessTiming(startTime, r.Topic)
-			}
-		}(time.Now())
 
 	infiniteLoop:
 		for {
@@ -237,7 +293,7 @@ infiniteLoop:
 			return
 		default:
 			if err := c.conn.CommitUncommittedOffsets(ctx); err != nil {
-				c.cl.consumerMetrics.CollectHandleError("")
+				c.cl.stats.recordOffsetCommitError()
 				c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
 			} else {
@@ -253,12 +309,6 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 		if len(records) == 0 {
 			return
 		}
-
-		defer func(startTime time.Time) {
-			for _, r := range records {
-				c.cl.consumerMetrics.CollectHandleProcessTiming(startTime, r.Topic)
-			}
-		}(time.Now())
 
 		select {
 		case <-c.cl.exitCh:
@@ -302,17 +352,17 @@ func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, i
 		timer.Stop()
 	}
 
-	c.flushAcksEternal(ctx, "")
+	c.flushAcksEternal(ctx)
 }
 
-func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
+func (c *Client) flushAcksEternal(ctx context.Context) {
 	for {
 		select {
 		case <-c.cl.exitCh:
 			return
 		default:
 			if err := c.conn.FlushAcks(ctx); err != nil {
-				c.cl.consumerMetrics.CollectHandleError(topic)
+				c.cl.stats.recordShareAckError()
 				c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 				time.Sleep(c.cl.suspendCommittingTimeout)
 				continue
@@ -324,13 +374,16 @@ func (c *Client) flushAcksEternal(ctx context.Context, topic string) {
 }
 
 func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
+	startTime := time.Now()
+
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 
+		c.cl.stats.recordHandle(len(records), time.Since(startTime), err)
+
 		if err != nil {
-			c.cl.consumerMetrics.CollectHandleError("")
 			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
 				logKeyError, err,
 				logKeyRecords, c.cl.formatRecords(records...),

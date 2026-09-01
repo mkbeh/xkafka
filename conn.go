@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/mkbeh/xkafka/internal/kprom"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
@@ -18,12 +17,10 @@ type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
 
 // conn is the minimal Kafka client interface shared by Client and GroupTransactSession.
 type conn interface {
+	PollRecords(ctx context.Context, maxPollRecords int) kgo.Fetches
 	Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	ProduceSync(ctx context.Context, records ...*kgo.Record) kgo.ProduceResults
-
-	PollFetches(ctx context.Context) kgo.Fetches
-	PollRecords(ctx context.Context, maxPollRecords int) kgo.Fetches
 }
 
 var (
@@ -38,6 +35,10 @@ type client struct {
 	fmt    *kgo.RecordFormatter
 	logger kgo.Logger
 
+	name    string
+	labels  map[string]string
+	metrics Metrics
+
 	enabled     bool
 	promiseFunc PromiseFunc
 
@@ -45,7 +46,7 @@ type client struct {
 	clientHandleFetches func(*Client) handleFetchesFunc
 	groupHandleFetches  func(*GroupTransactSession) handleFetchesFunc
 
-	clientID        string
+	consumerGroup   string
 	groupSpecified  bool
 	batchSize       int
 	skipFatalErrors bool
@@ -58,14 +59,9 @@ type client struct {
 	shareReleaseTimeout        time.Duration
 
 	clientOps  []kgo.Opt
-	meterOpts  []kotel.MeterOpt
 	tracerOpts []kotel.TracerOpt
 
-	producerMetrics *kprom.ProducerMetrics
-	consumerMetrics *kprom.ConsumerMetrics
-
-	namespace string
-	labels    map[string]string
+	stats statsCollector
 
 	exitCh chan struct{}
 }
@@ -91,7 +87,7 @@ func newClient(opts ...Opt) (*client, error) {
 		opt.apply(c)
 	}
 
-	c.applyClientID()
+	c.applyName()
 
 	formatter, err := newFormatter()
 	if err != nil {
@@ -99,22 +95,35 @@ func newClient(opts ...Opt) (*client, error) {
 	}
 	c.fmt = formatter
 
-	instrumenting := kotel.NewKotel(
-		kotel.WithMeter(kotel.NewMeter(c.meterOpts...)),
-		kotel.WithTracer(kotel.NewTracer(c.tracerOpts...)),
-	)
-
-	metrics := kprom.NewMetrics(c.namespace, "kafka", c.labels)
-	c.producerMetrics = metrics.Producer()
-	c.consumerMetrics = metrics.Consumer()
+	tracer := kotel.NewTracer(c.tracerOpts...)
 
 	c.clientOps = append(c.clientOps,
 		kgo.WithLogger(c.logger),
-		kgo.WithHooks(instrumenting.Hooks(), metrics.Hooks()),
+		kgo.WithHooks(tracer),
 		kgo.KeepRetryableFetchErrors(),
 	)
 
 	return c, nil
+}
+
+func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.Produce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
+}
+
+func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
+	results := c.conn.ProduceSync(ctx, records...)
+	for _, r := range results {
+		if r.Err != nil {
+			c.stats.recordProduceError()
+			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
+		}
+	}
+
+	return results.FirstErr()
 }
 
 func (c *client) HandleFetches(ctx context.Context) error {
@@ -144,16 +153,16 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		fetches := c.conn.PollRecords(ctx, c.batchSize)
 		if fetches.IsClientClosed() {
-			c.logger.Log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerLabels, c.labels)
+			c.logger.Log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerGroup, c.consumerGroup)
 			return nil
 		}
 
 		for _, fetchErr := range fetches.Errors() {
+			c.stats.recordFetchError()
 			c.logger.Log(kgo.LogLevelError, "error fetching records",
 				logKeyError, fetchErr.Err,
 				logKeyTopic, fetchErr.Topic,
 			)
-			c.consumerMetrics.CollectHandleError(fetchErr.Topic)
 
 			if !kerr.IsRetriable(fetchErr.Err) && !c.skipFatalErrors {
 				return fetchErr.Err
@@ -162,26 +171,6 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		c.handleFetches(ctx, fetches)
 	}
-}
-
-func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.Produce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
-	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
-}
-
-func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
-	results := c.conn.ProduceSync(ctx, records...)
-	for _, r := range results {
-		if r.Err != nil {
-			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
-			c.producerMetrics.CollectProduceError(recordTopic(r.Record))
-		}
-	}
-
-	return results.FirstErr()
 }
 
 // Close stops the polling loop and is safe to call multiple times.
@@ -195,22 +184,38 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) applyClientID() {
-	if c.clientID == "" {
-		c.clientID = uuid.NewString()
+func (c *client) Name() string {
+	if c == nil {
+		return ""
 	}
 
-	c.clientOps = append(c.clientOps, kgo.ClientID(c.clientID))
-	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.clientID))
-	c.setMetricLabel("client_id", c.clientID)
+	return c.name
 }
 
-func (c *client) setMetricLabel(key, value string) {
-	if c.labels == nil {
-		c.labels = make(map[string]string)
+func (c *client) Label(key string) (string, bool) {
+	if c == nil {
+		return "", false
 	}
 
-	c.labels[key] = value
+	value, ok := c.labels[key]
+	return value, ok
+}
+
+func (c *client) Labels() map[string]string {
+	if c == nil {
+		return nil
+	}
+
+	return maps.Clone(c.labels)
+}
+
+func (c *client) applyName() {
+	if c.name == "" {
+		return
+	}
+
+	c.clientOps = append(c.clientOps, kgo.ClientID(c.name))
+	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.name))
 }
 
 func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
@@ -230,7 +235,7 @@ func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 
 func (c *client) loggingPromise(record *kgo.Record, err error) {
 	if err != nil {
-		c.producerMetrics.CollectProduceError(recordTopic(record))
+		c.stats.recordProduceError()
 		c.logger.Log(kgo.LogLevelError, "kafka async producer error",
 			logKeyError, err,
 			logKeyRecord, c.fmt.AppendRecord(nil, record),
@@ -250,12 +255,4 @@ func (c *client) formatRecords(records ...*kgo.Record) string {
 
 func newFormatter() (*kgo.RecordFormatter, error) {
 	return kgo.NewRecordFormatter("topic: %t, key: %k, msg: %v")
-}
-
-func recordTopic(record *kgo.Record) string {
-	if record == nil {
-		return ""
-	}
-
-	return record.Topic
 }

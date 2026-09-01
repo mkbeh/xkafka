@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	logKeyError          = "error"
-	logKeyTopic          = "topic"
-	logKeyRecord         = "record"
-	logKeyRecords        = "records"
-	logKeyConsumerLabels = "consumer_labels"
+	logKeyError         = "error"
+	logKeyTopic         = "topic"
+	logKeyRecord        = "record"
+	logKeyRecords       = "records"
+	logKeyConsumerGroup = "consumer_group"
 )
 
 func newDefaultLogger() kgo.Logger {

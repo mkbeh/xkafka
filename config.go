@@ -3,6 +3,7 @@ package xkafka
 import (
 	"crypto/tls"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/plain"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 	"github.com/twmb/franz-go/plugin/kotel"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -252,6 +252,53 @@ type Config struct {
 // Client options
 ////////////////////////////////////////////////////////
 
+// WithName sets a stable client name used for observability and as the Kafka client ID.
+func WithName(name string) Opt {
+	name = strings.TrimSpace(name)
+
+	return clientOpt{fn: func(c *client) {
+		if name != "" {
+			c.name = name
+		}
+	}}
+}
+
+// WithLabel adds or replaces one observability label.
+func WithLabel(key, value string) Opt {
+	return clientOpt{fn: func(c *client) {
+		if key != "" {
+			c.labels[key] = value
+		}
+	}}
+}
+
+// WithLabels merges observability labels into the client metadata.
+//
+// Labels are defensively copied. When the same key is configured more than
+// once, the last value wins.
+func WithLabels(labels map[string]string) Opt {
+	labels = maps.Clone(labels)
+
+	return clientOpt{fn: func(c *client) {
+		for key, value := range labels {
+			if key != "" {
+				c.labels[key] = value
+			}
+		}
+	}}
+}
+
+// WithMetrics attaches one metrics implementation to the client or group transaction session.
+//
+// Metrics are registered during creation and unregistered automatically during Shutdown.
+func WithMetrics(metrics Metrics) Opt {
+	return clientOpt{fn: func(c *client) {
+		if metrics != nil {
+			c.metrics = metrics
+		}
+	}}
+}
+
 func WithConfig(config *Config) Opt {
 	return clientOpt{fn: func(c *client) {
 		if config == nil {
@@ -328,14 +375,6 @@ func WithLogger(logger kgo.Logger) Opt {
 	}}
 }
 
-func WithClientID(s string) Opt {
-	return clientOpt{fn: func(c *client) {
-		if s != "" {
-			c.clientID = s
-		}
-	}}
-}
-
 func WithTLS(tlsConfig *tls.Config) Opt {
 	return clientOpt{fn: func(c *client) {
 		if tlsConfig != nil {
@@ -344,29 +383,11 @@ func WithTLS(tlsConfig *tls.Config) Opt {
 	}}
 }
 
-func WithMeterProvider(provider metric.MeterProvider) Opt {
+func WithHooks(hooks ...kgo.Hook) Opt {
 	return clientOpt{fn: func(c *client) {
-		if provider != nil {
-			c.meterOpts = append(c.meterOpts, kotel.MeterProvider(provider))
+		if len(hooks) > 0 {
+			c.clientOps = append(c.clientOps, kgo.WithHooks(hooks...))
 		}
-	}}
-}
-
-func WithMetricsNamespace(namespace string) Opt {
-	return clientOpt{fn: func(c *client) {
-		if namespace != "" {
-			c.namespace = namespace
-		}
-	}}
-}
-
-func WithMetricLabel(key, value string) Opt {
-	return clientOpt{fn: func(c *client) {
-		if key == "" {
-			return
-		}
-
-		c.setMetricLabel(key, value)
 	}}
 }
 
@@ -767,8 +788,8 @@ func withConsumerGroup(group string) GroupOpt {
 		}
 
 		c.groupSpecified = true
+		c.consumerGroup = group
 		c.clientOps = append(c.clientOps, kgo.ConsumerGroup(group), kgo.DisableAutoCommit())
-		c.setMetricLabel("consumer_group", group)
 	}}
 }
 
@@ -814,8 +835,8 @@ func withShareGroup(group string) GroupOpt {
 			return
 		}
 
+		c.consumerGroup = group
 		c.clientOps = append(c.clientOps, kgo.ShareGroup(group))
-		c.setMetricLabel("consumer_group", group)
 	}}
 }
 
