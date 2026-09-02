@@ -324,7 +324,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 
 			switch {
 			case c.cl.manualCommit:
-				c.commitInternalOffsetsEternal(ctx)
+				c.commitOffsets(ctx)
 			case c.cl.autoCommitMarks:
 				c.cl.Client().MarkCommitRecords(records...)
 			}
@@ -334,7 +334,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 	}
 }
 
-func (c *Client) commitInternalOffsetsEternal(ctx context.Context) {
+func (c *Client) commitOffsets(ctx context.Context) {
 	if !c.cl.manualCommit {
 		return
 	}
@@ -369,15 +369,15 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 			return
 		default:
 			if err := c.handleRecords(ctx, records, handler); err != nil {
-				c.ackRecordsEternal(ctx, records, true)
+				c.ackRecords(ctx, records, true)
 				return
 			}
-			c.ackRecordsEternal(ctx, records, false)
+			c.ackRecords(ctx, records, false)
 		}
 	}
 }
 
-func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, isError bool) {
+func (c *Client) ackRecords(ctx context.Context, records []*kgo.Record, isError bool) {
 	var hasRelease bool
 
 	for _, record := range records {
@@ -406,10 +406,10 @@ func (c *Client) ackRecordsEternal(ctx context.Context, records []*kgo.Record, i
 		timer.Stop()
 	}
 
-	c.flushAcksEternal(ctx)
+	c.flushAcks(ctx)
 }
 
-func (c *Client) flushAcksEternal(ctx context.Context) {
+func (c *Client) flushAcks(ctx context.Context) {
 	conn := c.cl.Client()
 
 	for {

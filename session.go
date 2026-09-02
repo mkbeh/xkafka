@@ -178,7 +178,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				logKeyRecordCount, len(records),
 			)
 
-			g.handleTxError(ctx)
+			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
 			return
 		}
 
@@ -189,7 +189,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				logKeyRecordCount, len(records),
 			)
 
-			g.handleTxError(ctx)
+			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
 			return
 		}
 
@@ -253,15 +253,4 @@ func (g *GroupTransactSession) handleRecords(
 	}()
 
 	return handler(ctx, records, tx)
-}
-
-func (g *GroupTransactSession) handleTxError(ctx context.Context) {
-	timer := time.NewTimer(g.cl.suspendProcessingTimeout)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-	case <-g.cl.exitCh:
-	case <-timer.C:
-	}
 }
