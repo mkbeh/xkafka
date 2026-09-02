@@ -9,7 +9,6 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"github.com/twmb/franz-go/plugin/kotel"
 )
 
 // handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
@@ -59,8 +58,7 @@ type client struct {
 	shareRejectAfterDeliveries int32
 	shareReleaseTimeout        time.Duration
 
-	kafkaOpts  []kgo.Opt
-	tracerOpts []kotel.TracerOpt
+	kafkaOpts []kgo.Opt
 
 	stats statsCollector
 
@@ -93,12 +91,7 @@ func newClient(opts ...Opt) (*client, error) {
 	}
 	c.fmt = formatter
 
-	tracer := kotel.NewTracer(c.tracerOpts...)
-
-	c.kafkaOpts = append(c.kafkaOpts,
-		kgo.WithLogger(c.logger),
-		kgo.WithHooks(tracer),
-	)
+	c.kafkaOpts = append(c.kafkaOpts, kgo.WithLogger(c.logger))
 
 	return c, nil
 }
@@ -328,7 +321,6 @@ func (c *client) applyName() {
 	}
 
 	c.kafkaOpts = append(c.kafkaOpts, kgo.ClientID(c.name))
-	c.tracerOpts = append(c.tracerOpts, kotel.ClientID(c.name))
 }
 
 func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {

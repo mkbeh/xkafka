@@ -1,26 +1,33 @@
-# OpenTelemetry Metrics Example
+# OpenTelemetry Observability Example
 
-This example exports wrapper-level `xkafka` metrics and native `franz-go` operational metrics through one Prometheus
-endpoint.
+This example combines wrapper-level `xkafka` metrics, native `franz-go` metrics, and Kafka tracing.
 
 **This example demonstrates:**
 
 * exporting lightweight `xkafka` statistics through `extra/otelxkafka`;
 * exporting native Kafka client metrics through `franz-go/plugin/kprom`;
+* attaching `franz-go/plugin/kotel` tracing explicitly through `WithKafkaOptions`;
 * using one Prometheus registry for both metric layers;
-* producing and consuming a record to generate metrics.
+* exporting Kafka spans as JSON to stdout;
+* producing and consuming a record to generate metrics and traces.
 
-The two layers complement each other:
+The observability layers are independent:
 
 ```text
-xkafka Stats() ── extra/otelxkafka ── OpenTelemetry ──┐
-                                                     ├── Prometheus registry ── /metrics
-franz-go hooks ─────────── kprom ─────────────────────┘
+xkafka Stats() ── extra/otelxkafka ── OpenTelemetry metrics ──┐
+                                                             ├── Prometheus registry ── /metrics
+franz-go hooks ─────────── kprom ─────────────────────────────┘
+
+franz-go record hooks ──── kotel ─── OpenTelemetry tracing ───── stdout
 ```
 
 `extra/otelxkafka` exports wrapper-level behavior such as handler calls, handler errors, transaction outcomes, and
 wrapper errors. `kprom` exports Kafka client operational metrics such as produced and fetched records, bytes, buffered
-records, broker I/O, batches, request timings, and throttling.
+records, broker I/O, batches, request timings, and throttling. `kotel` creates Kafka produce and fetch spans and
+propagates trace context through record headers.
+
+Tracing is not enabled automatically by `xkafka`. The example attaches the native `kotel` tracer explicitly through
+`WithKafkaOptions`, so applications that do not configure tracing have no tracing hooks installed by `xkafka`.
 
 ## Local Kafka setup
 
@@ -90,6 +97,9 @@ consume: topic=sample-otel-topic partition=0 offset=0 key="otel" msg={ID:42 Text
 
 Partition and offset values depend on the Kafka topic state.
 
+The `kotel` tracer also writes Kafka spans as JSON to stdout. Trace context is injected into produced record headers and
+extracted again when the record is consumed.
+
 ## Metrics
 
 Open the Prometheus endpoint:
@@ -115,12 +125,13 @@ kafka_*           native franz-go metrics exported by kprom
 The example enables detailed `kprom` produce/fetch metrics for records, batches, compressed and uncompressed bytes, as
 well as request, read, write, and throttling histograms.
 
-`WithName("otel")` is also used as the Kafka client ID, so `kprom.WithClientLabel()` exposes the same stable client
-identity on native Kafka metrics.
+`WithName("otel")` sets the native Kafka client ID used by `kprom.WithClientLabel()`. The same value is passed explicitly
+to `kotel.ClientID("otel")` for tracing attributes.
 
 For production, enable only the `kprom` details and histograms you need to keep metric cardinality and collection cost
-appropriate for your workload.
+appropriate for your workload, and replace the stdout trace exporter with your preferred OpenTelemetry exporter.
 
 ## Stop
 
-Press `Ctrl+C` to stop the HTTP server, Kafka client, metrics registration, and OpenTelemetry `MeterProvider`.
+Press `Ctrl+C` to stop the HTTP server, Kafka client, metrics registration, OpenTelemetry `MeterProvider`, and
+OpenTelemetry `TracerProvider`.

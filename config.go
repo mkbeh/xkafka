@@ -6,9 +6,6 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
-	"github.com/twmb/franz-go/plugin/kotel"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Opt configures xkafka client behavior.
@@ -81,24 +78,6 @@ func WithLogger(logger kgo.Logger) Opt {
 	return clientOpt{fn: func(c *client) {
 		if logger != nil {
 			c.logger = logger
-		}
-	}}
-}
-
-// WithTracerProvider sets the OpenTelemetry tracer provider used by franz-go tracing.
-func WithTracerProvider(provider trace.TracerProvider) Opt {
-	return clientOpt{fn: func(c *client) {
-		if provider != nil {
-			c.tracerOpts = append(c.tracerOpts, kotel.TracerProvider(provider))
-		}
-	}}
-}
-
-// WithTracerPropagator sets the OpenTelemetry propagator used by franz-go tracing.
-func WithTracerPropagator(propagator propagation.TextMapPropagator) Opt {
-	return clientOpt{fn: func(c *client) {
-		if propagator != nil {
-			c.tracerOpts = append(c.tracerOpts, kotel.TracerPropagator(propagator))
 		}
 	}}
 }

@@ -17,67 +17,35 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
 	"github.com/twmb/franz-go/plugin/kprom"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
-	brokers  = "localhost:29092"
-	topic    = "sample-otel-topic"
-	group    = "sample-otel-group"
-	httpAddr = "localhost:9464"
+	clientName = "otel"
+	brokers    = "localhost:29092"
+	topic      = "sample-otel-topic"
+	group      = "sample-otel-group"
+	httpAddr   = "localhost:9464"
 )
-
-var client *xkafka.Client
 
 type message struct {
 	ID   int    `json:"id"`
 	Text string `json:"text"`
 }
 
-func produceHandler(w http.ResponseWriter, r *http.Request) {
-	payload, err := json.Marshal(message{
-		ID:   42,
-		Text: "hello from xkafka otel example",
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := client.ProduceSync(r.Context(), &kgo.Record{
-		Key:   []byte("otel"),
-		Value: payload,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func handleRecords(_ context.Context, records []*kgo.Record) error {
-	for _, record := range records {
-		var msg message
-		if err := json.Unmarshal(record.Value, &msg); err != nil {
-			return err
-		}
-
-		fmt.Printf(
-			"consume: topic=%s partition=%d offset=%d key=%q msg=%+v\n",
-			record.Topic,
-			record.Partition,
-			record.Offset,
-			record.Key,
-			msg,
-		)
-	}
-
-	return nil
-}
-
 func main() {
+	if err := run(); err != nil {
+		log.Fatalln(err)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -87,63 +55,52 @@ func main() {
 
 	registry := prometheus.NewRegistry()
 
-	exporter, err := otelprom.New(
-		otelprom.WithRegisterer(registry),
-	)
+	meterProvider, metrics, err := newMetrics(registry)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create metrics: %w", err)
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	meterProvider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(exporter),
-	)
+		if err := meterProvider.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown meter provider: %v", err)
+		}
+	}()
 
-	metrics, err := otelxkafka.New(
-		otelxkafka.WithMeterProvider(meterProvider),
-	)
+	tracerProvider, kafkaTracer, err := newTracer()
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create tracer: %w", err)
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	kafkaMetrics := kprom.NewMetrics(
-		"kafka",
-		kprom.Registry(registry),
-		kprom.WithClientLabel(),
-		kprom.FetchAndProduceDetail(
-			kprom.ByNode,
-			kprom.ByTopic,
-			kprom.Records,
-			kprom.Batches,
-			kprom.CompressedBytes,
-			kprom.UncompressedBytes,
-			kprom.ConsistentNaming,
-		),
-		kprom.Histograms(
-			kprom.ReadWait,
-			kprom.ReadTime,
-			kprom.WriteWait,
-			kprom.WriteTime,
-			kprom.RequestDurationE2E,
-			kprom.RequestThrottled,
-		),
-	)
+		if err := tracerProvider.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown tracer provider: %v", err)
+		}
+	}()
 
-	client, err = xkafka.NewClient(
-		xkafka.WithName("otel"),
+	kafkaMetrics := newKafkaMetrics(registry)
+
+	client, err := xkafka.NewClient(
+		xkafka.WithName(clientName),
 		xkafka.WithMetrics(metrics),
 		xkafka.WithKafkaOptions(
 			kgo.SeedBrokers(brokers),
 			kgo.DefaultProduceTopic(topic),
 			kgo.ConsumeTopics(topic),
 			kgo.ConsumerGroup(group),
-			kgo.WithHooks(kafkaMetrics),
+			kgo.WithHooks(
+				kafkaMetrics,
+				kafkaTracer,
+			),
 		),
 		xkafka.WithConsumerBatchHandler(handleRecords),
 	)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create kafka client: %w", err)
 	}
-
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -151,17 +108,14 @@ func main() {
 		if err := client.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown kafka client: %v", err)
 		}
-		if err := meterProvider.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown meter provider: %v", err)
-		}
 	}()
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	if err := client.Ping(pingCtx); err != nil {
-		cancel()
-		log.Fatalln(err)
-	}
+	err = client.Ping(pingCtx)
 	cancel()
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		if err := client.HandleFetches(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -170,7 +124,7 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /produce", produceHandler)
+	mux.HandleFunc("POST /produce", produceHandler(client))
 	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
 	server := &http.Server{
@@ -193,6 +147,125 @@ func main() {
 	log.Printf("HTTP server listening on http://%s", httpAddr)
 
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalln(err)
+		return err
 	}
+
+	return nil
+}
+
+func newMetrics(registry *prometheus.Registry) (*sdkmetric.MeterProvider, *otelxkafka.Metrics, error) {
+	exporter, err := otelprom.New(
+		otelprom.WithRegisterer(registry),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	meterProvider := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(exporter),
+	)
+
+	metrics, err := otelxkafka.New(
+		otelxkafka.WithMeterProvider(meterProvider),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return meterProvider, metrics, nil
+}
+
+func newTracer() (*sdktrace.TracerProvider, *kotel.Tracer, error) {
+	exporter, err := stdouttrace.New(
+		stdouttrace.WithPrettyPrint(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+	)
+
+	propagator := propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+
+	kafkaTracer := kotel.NewTracer(
+		kotel.ClientID(clientName),
+		kotel.ConsumerGroup(group),
+		kotel.TracerProvider(tracerProvider),
+		kotel.TracerPropagator(propagator),
+	)
+
+	return tracerProvider, kafkaTracer, nil
+}
+
+func newKafkaMetrics(registry *prometheus.Registry) *kprom.Metrics {
+	return kprom.NewMetrics(
+		"kafka",
+		kprom.Registry(registry),
+		kprom.WithClientLabel(),
+		kprom.FetchAndProduceDetail(
+			kprom.ByNode,
+			kprom.ByTopic,
+			kprom.Records,
+			kprom.Batches,
+			kprom.CompressedBytes,
+			kprom.UncompressedBytes,
+			kprom.ConsistentNaming,
+		),
+		kprom.Histograms(
+			kprom.ReadWait,
+			kprom.ReadTime,
+			kprom.WriteWait,
+			kprom.WriteTime,
+			kprom.RequestDurationE2E,
+			kprom.RequestThrottled,
+		),
+	)
+}
+
+func produceHandler(client *xkafka.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		payload, err := json.Marshal(message{
+			ID:   42,
+			Text: "hello from xkafka otel example",
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := client.ProduceSync(r.Context(), &kgo.Record{
+			Key:   []byte("otel"),
+			Value: payload,
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleRecords(_ context.Context, records []*kgo.Record) error {
+	for _, record := range records {
+		var msg message
+		if err := json.Unmarshal(record.Value, &msg); err != nil {
+			return err
+		}
+
+		fmt.Printf(
+			"consume: topic=%s partition=%d offset=%d key=%q msg=%+v\n",
+			record.Topic,
+			record.Partition,
+			record.Offset,
+			record.Key,
+			msg,
+		)
+	}
+
+	return nil
 }
