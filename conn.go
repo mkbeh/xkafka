@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sync"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kerr"
@@ -63,7 +64,8 @@ type client struct {
 
 	stats statsCollector
 
-	exitCh chan struct{}
+	closeOnce sync.Once
+	exitCh    chan struct{}
 }
 
 func newClient(opts ...Opt) (*client, error) {
@@ -281,15 +283,11 @@ func (c *client) Session() *kgo.GroupTransactSession {
 	return conn
 }
 
-// Close stops the polling loop and is safe to call multiple times.
+// Close stops the polling loop and is safe to call concurrently.
 func (c *client) Close() {
-	if c.exitCh != nil {
-		select {
-		case <-c.exitCh:
-		default:
-			close(c.exitCh)
-		}
-	}
+	c.closeOnce.Do(func() {
+		close(c.exitCh)
+	})
 }
 
 func (c *client) Name() string {
