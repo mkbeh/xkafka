@@ -178,18 +178,15 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	}
 
 	// Commit is a terminal transaction operation.
-	// After this point, do not run the deferred abort for arbitrary commit errors.
-	// franz-go allows TryAbort only for specific transaction errors.
+	// After this point, do not run the deferred full abort because commit
+	// failures are handled explicitly below.
 	shouldAbort = false
 
 	if err = conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
-		if errors.Is(err, kerr.OperationNotAttempted) || errors.Is(err, kerr.TransactionAbortable) {
+		if shouldRetryAbortAfterCommit(err) {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
-				return fmt.Errorf("kafka: commit failed: %w; abort also failed: %v", err, abortErr)
+				return fmt.Errorf("kafka: commit transaction: %w; recovery failed: %w", err, abortErr)
 			}
-
-			outcome = transactionOutcomeAbort
-			return fmt.Errorf("kafka: commit failed, transaction aborted: %w", err)
 		}
 
 		return fmt.Errorf("kafka: commit transaction: %w", err)
@@ -264,6 +261,23 @@ func (c *Client) abortTransaction(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func shouldRetryAbortAfterCommit(err error) bool {
+	if kerr.IsRetriable(err) ||
+		errors.Is(err, kerr.OperationNotAttempted) ||
+		errors.Is(err, kerr.TransactionAbortable) ||
+		errors.Is(err, kerr.UnknownServerError) {
+		return true
+	}
+
+	// An attempted EndTxn that fails with a non-Kafka error has an
+	// unconfirmed outcome (typically a transport failure). franz-go requires
+	// a TryAbort retry so it can recover the producer ID and fence-abort any
+	// transaction that may still be open broker-side.
+	_, isKafkaErr := errors.AsType[*kerr.Error](err)
+
+	return !isKafkaErr && !errors.Is(err, kgo.ErrClientClosed)
 }
 
 func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
