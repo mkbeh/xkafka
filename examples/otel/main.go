@@ -83,6 +83,9 @@ func run() error {
 
 	client, err := xkafka.NewClient(
 		xkafka.WithName(clientName),
+		xkafka.WithLogger(
+			kgo.BasicLogger(os.Stderr, kgo.LogLevelInfo, nil),
+		),
 		xkafka.WithMetrics(metrics),
 		xkafka.WithKafkaOptions(
 			kgo.SeedBrokers(brokers),

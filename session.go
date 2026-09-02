@@ -172,7 +172,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
 
 		if txErr != nil {
-			g.cl.logger.Log(kgo.LogLevelError, "error handling group transaction",
+			g.cl.log(kgo.LogLevelError, "error handling group transaction",
 				logKeyError, txErr,
 				logKeyRecord, g.cl.formatRecord(records[0]),
 				logKeyRecordCount, len(records),
@@ -183,7 +183,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if handleErr != nil {
-			g.cl.logger.Log(kgo.LogLevelError, "error handling records in group transaction",
+			g.cl.log(kgo.LogLevelError, "error handling records in group transaction",
 				logKeyError, handleErr,
 				logKeyRecord, g.cl.formatRecord(records[0]),
 				logKeyRecordCount, len(records),
@@ -194,7 +194,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 		}
 
 		if !committed {
-			g.cl.logger.Log(kgo.LogLevelDebug, "group transaction aborted before commit",
+			g.cl.log(kgo.LogLevelDebug, "group transaction aborted before commit",
 				logKeyConsumerGroup, g.cl.consumerGroup,
 			)
 

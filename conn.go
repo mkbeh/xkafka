@@ -73,8 +73,6 @@ type client struct {
 
 func newClient(opts ...Opt) (*client, error) {
 	c := &client{
-		logger: newDefaultLogger(),
-
 		maxPollRecords: 100,
 
 		pollInterval:             time.Second,
@@ -98,7 +96,9 @@ func newClient(opts ...Opt) (*client, error) {
 	c.fmt = formatter
 	c.initDefaultPromise()
 
-	c.kafkaOpts = append(c.kafkaOpts, kgo.WithLogger(c.logger))
+	if c.logger != nil {
+		c.kafkaOpts = append(c.kafkaOpts, kgo.WithLogger(c.logger))
+	}
 
 	return c, nil
 }
@@ -126,7 +126,7 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	for _, r := range results {
 		if r.Err != nil {
 			c.stats.recordProduceError()
-			c.logger.Log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
+			c.log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (c *client) HandleFetches(ctx context.Context) error {
 
 		fetches := c.conn.PollRecords(ctx, c.maxPollRecords)
 		if fetches.IsClientClosed() {
-			c.logger.Log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerGroup, c.consumerGroup)
+			c.log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerGroup, c.consumerGroup)
 			return nil
 		}
 
@@ -198,14 +198,14 @@ func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
 		c.stats.recordFetchError()
 
 		if isRecoverableFetchError(err) {
-			c.logger.Log(kgo.LogLevelWarn, "recoverable error fetching records",
+			c.log(kgo.LogLevelWarn, "recoverable error fetching records",
 				logKeyError, err,
 				logKeyTopic, topic,
 			)
 			return
 		}
 
-		c.logger.Log(kgo.LogLevelError, "error fetching records",
+		c.log(kgo.LogLevelError, "error fetching records",
 			logKeyError, err,
 			logKeyTopic, topic,
 		)
@@ -362,7 +362,7 @@ func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 func (c *client) loggingPromise(record *kgo.Record, err error) {
 	if err != nil {
 		c.stats.recordProduceError()
-		c.logger.Log(kgo.LogLevelError, "kafka async producer error",
+		c.log(kgo.LogLevelError, "kafka async producer error",
 			logKeyError, err,
 			logKeyRecord, c.formatRecord(record),
 		)

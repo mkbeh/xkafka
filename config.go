@@ -74,11 +74,11 @@ func WithMetrics(metrics Metrics) Opt {
 }
 
 // WithLogger sets the logger used by xkafka and franz-go.
+//
+// Logging is disabled by default.
 func WithLogger(logger kgo.Logger) Opt {
 	return clientOpt{fn: func(c *client) {
-		if logger != nil {
-			c.logger = logger
-		}
+		c.logger = logger
 	}}
 }
 

@@ -158,11 +158,11 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			c.cl.logger.Log(kgo.LogLevelError, "panic recovered in kafka transaction, aborting", logKeyError, r)
+			c.cl.log(kgo.LogLevelError, "panic recovered in kafka transaction, aborting", logKeyError, r)
 
 			if shouldAbort {
 				if abortErr := c.abortTransaction(ctx); abortErr != nil {
-					c.cl.logger.Log(kgo.LogLevelError, "kafka transaction abort after panic failed",
+					c.cl.log(kgo.LogLevelError, "kafka transaction abort after panic failed",
 						logKeyError, abortErr,
 					)
 				} else {
@@ -228,13 +228,13 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	var err error
 
 	if flushErr := conn.Flush(ctx); flushErr != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
+		c.cl.log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
 	if flushErr := conn.FlushAcks(ctx); flushErr != nil {
 		c.cl.stats.recordShareAckError()
-		c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
+		c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
@@ -271,12 +271,12 @@ func (c *Client) abortTransaction(ctx context.Context) error {
 	// AbortBufferedRecords is required before aborting a transaction so that
 	// buffered records are not accidentally carried into the next transaction.
 	if err := conn.AbortBufferedRecords(ctx); err != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error aborting buffered records", logKeyError, err)
+		c.cl.log(kgo.LogLevelError, "error aborting buffered records", logKeyError, err)
 		return fmt.Errorf("abort buffered records: %w", err)
 	}
 
 	if err := conn.EndTransaction(ctx, kgo.TryAbort); err != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error rolling back transaction", logKeyError, err)
+		c.cl.log(kgo.LogLevelError, "error rolling back transaction", logKeyError, err)
 		return fmt.Errorf("abort transaction: %w", err)
 	}
 
@@ -344,7 +344,7 @@ func (c *Client) commitOffsets(ctx context.Context) {
 	for {
 		if err := conn.CommitUncommittedOffsets(ctx); err != nil {
 			c.cl.stats.recordOffsetCommitError()
-			c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
+			c.cl.log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
 				return
@@ -415,7 +415,7 @@ func (c *Client) flushAcks(ctx context.Context) {
 	for {
 		if err := conn.FlushAcks(ctx); err != nil {
 			c.cl.stats.recordShareAckError()
-			c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
+			c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
 				return
@@ -439,7 +439,7 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 		c.cl.stats.recordHandle(len(records), time.Since(startTime), err)
 
 		if err != nil {
-			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
+			c.cl.log(kgo.LogLevelError, "error handling records",
 				logKeyError, err,
 				logKeyRecord, c.cl.formatRecord(records[0]),
 				logKeyRecordCount, len(records),
