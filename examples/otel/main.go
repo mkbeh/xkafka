@@ -14,12 +14,9 @@ import (
 
 	"github.com/mkbeh/xkafka"
 	"github.com/mkbeh/xkafka/extra/otelxkafka"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
-	"github.com/twmb/franz-go/plugin/kprom"
-	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -31,7 +28,7 @@ const (
 	brokers    = "localhost:29092"
 	topic      = "sample-otel-topic"
 	group      = "sample-otel-group"
-	httpAddr   = "localhost:9464"
+	httpAddr   = "localhost:8080"
 )
 
 type message struct {
@@ -53,9 +50,7 @@ func run() error {
 	)
 	defer stop()
 
-	registry := prometheus.NewRegistry()
-
-	meterProvider, metrics, err := newMetrics(registry)
+	meterProvider, metrics, kafkaMeter, err := newMetrics()
 	if err != nil {
 		return fmt.Errorf("create metrics: %w", err)
 	}
@@ -81,7 +76,10 @@ func run() error {
 		}
 	}()
 
-	kafkaMetrics := newKafkaMetrics(registry)
+	kafkaTelemetry := kotel.NewKotel(
+		kotel.WithMeter(kafkaMeter),
+		kotel.WithTracer(kafkaTracer),
+	)
 
 	client, err := xkafka.NewClient(
 		xkafka.WithName(clientName),
@@ -91,10 +89,7 @@ func run() error {
 			kgo.DefaultProduceTopic(topic),
 			kgo.ConsumeTopics(topic),
 			kgo.ConsumerGroup(group),
-			kgo.WithHooks(
-				kafkaMetrics,
-				kafkaTracer,
-			),
+			kgo.WithHooks(kafkaTelemetry.Hooks()...),
 		),
 		xkafka.WithConsumerBatchHandler(handleRecords),
 	)
@@ -125,7 +120,6 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /produce", produceHandler(client))
-	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
 	server := &http.Server{
 		Addr:              httpAddr,
@@ -153,26 +147,35 @@ func run() error {
 	return nil
 }
 
-func newMetrics(registry *prometheus.Registry) (*sdkmetric.MeterProvider, *otelxkafka.Metrics, error) {
-	exporter, err := otelprom.New(
-		otelprom.WithRegisterer(registry),
+func newMetrics() (*sdkmetric.MeterProvider, *otelxkafka.Metrics, *kotel.Meter, error) {
+	exporter, err := stdoutmetric.New(
+		stdoutmetric.WithPrettyPrint(),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
+	reader := sdkmetric.NewPeriodicReader(
+		exporter,
+		sdkmetric.WithInterval(5*time.Second),
+	)
+
 	meterProvider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(exporter),
+		sdkmetric.WithReader(reader),
 	)
 
 	metrics, err := otelxkafka.New(
 		otelxkafka.WithMeterProvider(meterProvider),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return meterProvider, metrics, nil
+	kafkaMeter := kotel.NewMeter(
+		kotel.MeterProvider(meterProvider),
+	)
+
+	return meterProvider, metrics, kafkaMeter, nil
 }
 
 func newTracer() (*sdktrace.TracerProvider, *kotel.Tracer, error) {
@@ -200,31 +203,6 @@ func newTracer() (*sdktrace.TracerProvider, *kotel.Tracer, error) {
 	)
 
 	return tracerProvider, kafkaTracer, nil
-}
-
-func newKafkaMetrics(registry *prometheus.Registry) *kprom.Metrics {
-	return kprom.NewMetrics(
-		"kafka",
-		kprom.Registry(registry),
-		kprom.WithClientLabel(),
-		kprom.FetchAndProduceDetail(
-			kprom.ByNode,
-			kprom.ByTopic,
-			kprom.Records,
-			kprom.Batches,
-			kprom.CompressedBytes,
-			kprom.UncompressedBytes,
-			kprom.ConsistentNaming,
-		),
-		kprom.Histograms(
-			kprom.ReadWait,
-			kprom.ReadTime,
-			kprom.WriteWait,
-			kprom.WriteTime,
-			kprom.RequestDurationE2E,
-			kprom.RequestThrottled,
-		),
-	)
 }
 
 func produceHandler(client *xkafka.Client) http.HandlerFunc {
