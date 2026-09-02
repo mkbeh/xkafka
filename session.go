@@ -207,20 +207,9 @@ func (g *GroupTransactSession) handleRecordsInTx(
 		return false, nil, fmt.Errorf("kafka: begin group transaction: %w", err)
 	}
 
-	handleStart := time.Now()
-
-	defer func() {
-		if r := recover(); r != nil {
-			handleErr = fmt.Errorf("kafka: batch handler panic: %v", r)
-			committed, txErr = conn.End(ctx, kgo.TryAbort)
-		}
-
-		g.cl.stats.recordHandle(len(records), time.Since(handleStart), handleErr)
-	}()
-
 	tx := &Tx{cl: g.cl}
 
-	handleErr = handler(ctx, records, tx)
+	handleErr = g.handleRecords(ctx, records, tx, handler)
 
 	endTry := kgo.TryCommit
 	if handleErr != nil {
@@ -233,6 +222,25 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	}
 
 	return committed, handleErr, nil
+}
+
+func (g *GroupTransactSession) handleRecords(
+	ctx context.Context,
+	records []*kgo.Record,
+	tx *Tx,
+	handler BatchTxHandlerFunc,
+) (err error) {
+	startTime := time.Now()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("kafka: batch handler panic: %v", r)
+		}
+
+		g.cl.stats.recordHandle(len(records), time.Since(startTime), err)
+	}()
+
+	return handler(ctx, records, tx)
 }
 
 func (g *GroupTransactSession) handleTxError(ctx context.Context) {
