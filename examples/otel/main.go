@@ -91,7 +91,7 @@ func run() error {
 			kgo.ConsumerGroup(group),
 			kgo.WithHooks(kafkaTelemetry.Hooks()...),
 		),
-		xkafka.WithConsumerBatchHandler(handleRecords),
+		xkafka.WithBatchHandler(handleRecords),
 	)
 	if err != nil {
 		return fmt.Errorf("create kafka client: %w", err)

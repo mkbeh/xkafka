@@ -35,10 +35,9 @@ func NewClient(opts ...Opt) (*Client, error) {
 		cl: cl,
 	}
 
-	// Bind the fetch handler after Client is created because the adapter needs
-	// Client-specific operations such as offset commits and Share Group acknowledgments.
-	if cl.clientHandleFetches != nil {
-		cl.handleFetches = cl.clientHandleFetches(c)
+	if err := c.bindHandler(); err != nil {
+		conn.Close()
+		return nil, err
 	}
 
 	if err := c.registerMetrics(cl.metrics); err != nil {
@@ -47,6 +46,26 @@ func NewClient(opts ...Opt) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+func (c *Client) bindHandler() error {
+	if c.cl.batchHandler == nil {
+		if c.cl.consumerGroup != "" || c.cl.shareGroup != "" {
+			return errors.New("kafka: consumer requires batch handler")
+		}
+
+		return nil
+	}
+
+	if c.cl.shareGroup != "" {
+		c.cl.handleFetches = c.handleShareFetchesBatch(c.cl.batchHandler)
+		return nil
+	}
+
+	// Regular consumer group or direct consumption.
+	c.cl.handleFetches = c.handleFetchesBatch(c.cl.batchHandler)
+
+	return nil
 }
 
 // Name returns the logical client name configured with WithName.

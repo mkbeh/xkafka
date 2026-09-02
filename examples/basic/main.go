@@ -97,7 +97,7 @@ func main() {
 			kgo.ConsumeTopics(topic),
 			kgo.ConsumerGroup(group),
 		),
-		xkafka.WithConsumerBatchHandler(handleRecords),
+		xkafka.WithBatchHandler(handleRecords),
 	)
 	if err != nil {
 		log.Fatalln(err)

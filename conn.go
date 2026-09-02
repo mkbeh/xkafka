@@ -44,9 +44,9 @@ type client struct {
 	promiseFunc    PromiseFunc
 	defaultPromise PromiseFunc
 
-	handleFetches       handleFetchesFunc
-	clientHandleFetches func(*Client) handleFetchesFunc
-	groupHandleFetches  func(*GroupTransactSession) handleFetchesFunc
+	handleFetches  handleFetchesFunc
+	batchHandler   BatchHandlerFunc
+	sessionHandler BatchTxHandlerFunc
 
 	consumerGroup   string
 	shareGroup      string

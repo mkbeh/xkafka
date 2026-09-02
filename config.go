@@ -89,45 +89,19 @@ func WithProducePromise(promise PromiseFunc) Opt {
 	}}
 }
 
-// WithConsumerBatchHandler sets the regular consumer batch handler.
-func WithConsumerBatchHandler(handler BatchHandlerFunc) Opt {
-	return clientOpt{fn: func(cl *client) {
-		if handler == nil {
-			cl.clientHandleFetches = nil
-			return
-		}
-
-		cl.clientHandleFetches = func(c *Client) handleFetchesFunc {
-			return c.handleFetchesBatch(handler)
-		}
-	}}
-}
-
-// WithShareGroupBatchHandler sets the Share Group batch handler.
-func WithShareGroupBatchHandler(handler BatchHandlerFunc) Opt {
-	return clientOpt{fn: func(cl *client) {
-		if handler == nil {
-			cl.clientHandleFetches = nil
-			return
-		}
-
-		cl.clientHandleFetches = func(c *Client) handleFetchesFunc {
-			return c.handleShareFetchesBatch(handler)
-		}
+// WithBatchHandler sets the batch handler for regular consumers and Share Groups.
+//
+// When kgo.ShareGroup is configured, Share Group acknowledgement semantics are used.
+func WithBatchHandler(handler BatchHandlerFunc) Opt {
+	return clientOpt{fn: func(c *client) {
+		c.batchHandler = handler
 	}}
 }
 
 // WithGroupTransactSessionBatchHandler sets the group transaction session batch handler.
 func WithGroupTransactSessionBatchHandler(handler BatchTxHandlerFunc) Opt {
 	return clientOpt{fn: func(c *client) {
-		if handler == nil {
-			c.groupHandleFetches = nil
-			return
-		}
-
-		c.groupHandleFetches = func(session *GroupTransactSession) handleFetchesFunc {
-			return session.handleFetchesBatch(handler)
-		}
+		c.sessionHandler = handler
 	}}
 }
 

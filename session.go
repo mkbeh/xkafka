@@ -2,6 +2,7 @@ package xkafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -36,10 +37,9 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 		cl: cl,
 	}
 
-	// Bind the fetch handler after GroupTransactSession is created because the adapter
-	// needs the session instance to produce records and commit offsets transactionally.
-	if cl.groupHandleFetches != nil {
-		cl.handleFetches = cl.groupHandleFetches(g)
+	if err := g.bindHandler(); err != nil {
+		conn.Close()
+		return nil, err
 	}
 
 	if err := g.registerMetrics(cl.metrics); err != nil {
@@ -48,6 +48,16 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	}
 
 	return g, nil
+}
+
+func (g *GroupTransactSession) bindHandler() error {
+	if g.cl.sessionHandler == nil {
+		return errors.New("kafka: group transact session requires batch handler")
+	}
+
+	g.cl.handleFetches = g.handleFetchesBatch(g.cl.sessionHandler)
+
+	return nil
 }
 
 // Name returns the logical session name configured with WithName.
