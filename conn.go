@@ -343,19 +343,13 @@ func (c *client) loggingPromise(record *kgo.Record, err error) {
 		c.stats.recordProduceError()
 		c.logger.Log(kgo.LogLevelError, "kafka async producer error",
 			logKeyError, err,
-			logKeyRecord, c.fmt.AppendRecord(nil, record),
+			logKeyRecord, c.formatRecord(record),
 		)
 	}
 }
 
-func (c *client) formatRecords(records ...*kgo.Record) string {
-	buff := make([]byte, 0)
-
-	for _, record := range records {
-		buff = c.fmt.AppendRecord(buff, record)
-	}
-
-	return string(buff)
+func (c *client) formatRecord(record *kgo.Record) string {
+	return string(c.fmt.AppendRecord(nil, record))
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {

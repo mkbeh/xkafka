@@ -421,7 +421,8 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 		if err != nil {
 			c.cl.logger.Log(kgo.LogLevelError, "error handling records",
 				logKeyError, err,
-				logKeyRecords, c.cl.formatRecords(records...),
+				logKeyRecord, c.cl.formatRecord(records[0]),
+				logKeyRecordCount, len(records),
 			)
 		}
 	}()

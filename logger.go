@@ -10,7 +10,7 @@ const (
 	logKeyError         = "error"
 	logKeyTopic         = "topic"
 	logKeyRecord        = "record"
-	logKeyRecords       = "records"
+	logKeyRecordCount   = "record_count"
 	logKeyConsumerGroup = "consumer_group"
 )
 
