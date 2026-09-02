@@ -179,7 +179,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 		if shouldAbort && err != nil {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
-				err = fmt.Errorf("kafka: transaction failed: %w; abort failed: %v", err, abortErr)
+				err = fmt.Errorf("kafka: transaction failed: %w; abort failed: %w", err, abortErr)
 			} else {
 				outcome = transactionOutcomeAbort
 			}
@@ -233,7 +233,8 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	}
 
 	if flushErr := conn.FlushAcks(ctx); flushErr != nil {
-		c.cl.logger.Log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
+		c.cl.stats.recordShareAckError()
+		c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
 		err = errors.Join(err, flushErr)
 	}
 
