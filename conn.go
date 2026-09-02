@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kerr"
@@ -65,6 +66,7 @@ type client struct {
 
 	stats statsCollector
 
+	polling   atomic.Bool
 	closeOnce sync.Once
 	exitCh    chan struct{}
 }
@@ -139,6 +141,11 @@ func (c *client) HandleFetches(ctx context.Context) error {
 	if c.handleFetches == nil {
 		return errors.New("kafka: fetches handler is nil")
 	}
+
+	if c.polling.Swap(true) {
+		return errors.New("kafka: fetch loop already running")
+	}
+	defer c.polling.Store(false)
 
 	pollTicker := time.NewTicker(c.pollInterval)
 	defer pollTicker.Stop()
