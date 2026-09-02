@@ -192,7 +192,54 @@ func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
 		return nil
 	}
 
-	return fmt.Errorf("kafka: fetch topic %q partition %d: %w", firstTopic, firstPartition, firstErr)
+	return fmt.Errorf(
+		"kafka: fetch topic %q partition %d: %w",
+		firstTopic,
+		firstPartition,
+		firstErr,
+	)
+}
+
+func isRecoverableFetchError(err error) bool {
+	if kerr.IsRetriable(err) {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrDataLoss](err); ok {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrGroupSession](err); ok {
+		return true
+	}
+
+	return false
+}
+
+func (c *client) wait(ctx context.Context, delay time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.exitCh:
+		return false
+	default:
+	}
+
+	if delay <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.exitCh:
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (c *client) applyKafkaOptions(conn *kgo.Client) {
@@ -306,20 +353,4 @@ func (c *client) formatRecords(records ...*kgo.Record) string {
 
 func newFormatter() (*kgo.RecordFormatter, error) {
 	return kgo.NewRecordFormatter("topic: %t, key: %k, msg: %v")
-}
-
-func isRecoverableFetchError(err error) bool {
-	if kerr.IsRetriable(err) {
-		return true
-	}
-
-	if _, ok := errors.AsType[*kgo.ErrDataLoss](err); ok {
-		return true
-	}
-
-	if _, ok := errors.AsType[*kgo.ErrGroupSession](err); ok {
-		return true
-	}
-
-	return false
 }

@@ -269,19 +269,23 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			return
 		}
 
-	infiniteLoop:
 		for {
 			select {
 			case <-c.cl.exitCh:
 				return
 			default:
-				if err := c.handleRecords(ctx, records, handler); err != nil {
-					time.Sleep(c.cl.suspendProcessingTimeout)
-					continue
-				}
-				c.commitInternalOffsetsEternal(ctx)
-				break infiniteLoop
 			}
+
+			if err := c.handleRecords(ctx, records, handler); err != nil {
+				if !c.cl.wait(ctx, c.cl.suspendProcessingTimeout) {
+					return
+				}
+
+				continue
+			}
+
+			c.commitInternalOffsetsEternal(ctx)
+			return
 		}
 	}
 }
@@ -293,20 +297,19 @@ func (c *Client) commitInternalOffsetsEternal(ctx context.Context) {
 
 	conn := c.cl.Client()
 
-infiniteLoop:
 	for {
-		select {
-		case <-c.cl.exitCh:
-			return
-		default:
-			if err := conn.CommitUncommittedOffsets(ctx); err != nil {
-				c.cl.stats.recordOffsetCommitError()
-				c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
-				time.Sleep(c.cl.suspendCommittingTimeout)
-			} else {
-				break infiniteLoop
+		if err := conn.CommitUncommittedOffsets(ctx); err != nil {
+			c.cl.stats.recordOffsetCommitError()
+			c.cl.logger.Log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
+
+			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
+				return
 			}
+
+			continue
 		}
+
+		return
 	}
 }
 
@@ -366,19 +369,18 @@ func (c *Client) flushAcksEternal(ctx context.Context) {
 	conn := c.cl.Client()
 
 	for {
-		select {
-		case <-c.cl.exitCh:
-			return
-		default:
-			if err := conn.FlushAcks(ctx); err != nil {
-				c.cl.stats.recordShareAckError()
-				c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
-				time.Sleep(c.cl.suspendCommittingTimeout)
-				continue
+		if err := conn.FlushAcks(ctx); err != nil {
+			c.cl.stats.recordShareAckError()
+			c.cl.logger.Log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
+
+			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
+				return
 			}
 
-			return
+			continue
 		}
+
+		return
 	}
 }
 
