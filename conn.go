@@ -40,7 +40,8 @@ type client struct {
 	labels  map[string]string
 	metrics Metrics
 
-	promiseFunc PromiseFunc
+	promiseFunc    PromiseFunc
+	defaultPromise PromiseFunc
 
 	handleFetches       handleFetchesFunc
 	clientHandleFetches func(*Client) handleFetchesFunc
@@ -93,6 +94,7 @@ func newClient(opts ...Opt) (*client, error) {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
 	}
 	c.fmt = formatter
+	c.initDefaultPromise()
 
 	c.kafkaOpts = append(c.kafkaOpts, kgo.WithLogger(c.logger))
 
@@ -100,10 +102,20 @@ func newClient(opts ...Opt) (*client, error) {
 }
 
 func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	if promise == nil {
+		c.conn.Produce(ctx, record, c.defaultPromise)
+		return
+	}
+
 	c.conn.Produce(ctx, record, c.wrapPromise(promise))
 }
 
 func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	if promise == nil {
+		c.conn.TryProduce(ctx, record, c.defaultPromise)
+		return
+	}
+
 	c.conn.TryProduce(ctx, record, c.wrapPromise(promise))
 }
 
@@ -323,18 +335,20 @@ func (c *client) applyName() {
 	c.kafkaOpts = append(c.kafkaOpts, kgo.ClientID(c.name))
 }
 
-func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
-	return func(record *kgo.Record, err error) {
+func (c *client) initDefaultPromise() {
+	c.defaultPromise = func(record *kgo.Record, err error) {
 		c.loggingPromise(record, err)
-
-		if promise != nil {
-			promise(record, err)
-			return
-		}
 
 		if c.promiseFunc != nil {
 			c.promiseFunc(record, err)
 		}
+	}
+}
+
+func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
+	return func(record *kgo.Record, err error) {
+		c.loggingPromise(record, err)
+		promise(record, err)
 	}
 }
 
