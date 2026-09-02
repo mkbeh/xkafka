@@ -302,7 +302,13 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				continue
 			}
 
-			c.commitInternalOffsetsEternal(ctx)
+			switch {
+			case c.cl.manualCommit:
+				c.commitInternalOffsetsEternal(ctx)
+			case c.cl.autoCommitMarks:
+				c.cl.Client().MarkCommitRecords(records...)
+			}
+
 			return
 		}
 	}

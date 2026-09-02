@@ -45,11 +45,12 @@ type client struct {
 	clientHandleFetches func(*Client) handleFetchesFunc
 	groupHandleFetches  func(*GroupTransactSession) handleFetchesFunc
 
-	consumerGroup  string
-	shareGroup     string
-	manualCommit   bool
-	blockRebalance bool
-	maxPollRecords int
+	consumerGroup   string
+	shareGroup      string
+	manualCommit    bool
+	autoCommitMarks bool
+	blockRebalance  bool
+	maxPollRecords  int
 
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
@@ -255,6 +256,7 @@ func (c *client) applyKafkaOptions(conn *kgo.Client) {
 
 	if c.consumerGroup != "" {
 		c.manualCommit, _ = conn.OptValue(kgo.DisableAutoCommit).(bool)
+		c.autoCommitMarks, _ = conn.OptValue(kgo.AutoCommitMarks).(bool)
 		c.blockRebalance, _ = conn.OptValue(kgo.BlockRebalanceOnPoll).(bool)
 	}
 }
