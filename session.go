@@ -127,7 +127,12 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 	}
 
 	if g.cl.conn != nil {
-		g.cl.Session().Close()
+		conn := g.cl.Session()
+		if g.cl.blockRebalance {
+			conn.CloseAllowingRebalance()
+		} else {
+			conn.Close()
+		}
 	}
 
 	return nil

@@ -18,6 +18,7 @@ type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
 // conn is the minimal Kafka client interface shared by Client and GroupTransactSession.
 type conn interface {
 	PollRecords(ctx context.Context, maxPollRecords int) kgo.Fetches
+	AllowRebalance()
 	Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	ProduceSync(ctx context.Context, records ...*kgo.Record) kgo.ProduceResults
@@ -48,6 +49,7 @@ type client struct {
 	consumerGroup  string
 	shareGroup     string
 	manualCommit   bool
+	blockRebalance bool
 	maxPollRecords int
 
 	pollInterval             time.Duration
@@ -148,16 +150,28 @@ func (c *client) HandleFetches(ctx context.Context) error {
 			return nil
 		}
 
-		if err := ctx.Err(); err != nil {
+		if err := c.processFetches(ctx, fetches); err != nil {
 			return err
 		}
-
-		if err := c.handleFetchErrors(fetches); err != nil {
-			return err
-		}
-
-		c.handleFetches(ctx, fetches)
 	}
+}
+
+func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error {
+	if c.blockRebalance {
+		defer c.conn.AllowRebalance()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if err := c.handleFetchErrors(fetches); err != nil {
+		return err
+	}
+
+	c.handleFetches(ctx, fetches)
+
+	return nil
 }
 
 func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
@@ -248,6 +262,7 @@ func (c *client) applyKafkaOptions(conn *kgo.Client) {
 
 	if c.consumerGroup != "" {
 		c.manualCommit, _ = conn.OptValue(kgo.DisableAutoCommit).(bool)
+		c.blockRebalance, _ = conn.OptValue(kgo.BlockRebalanceOnPoll).(bool)
 	}
 }
 

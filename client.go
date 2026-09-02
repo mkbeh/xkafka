@@ -225,7 +225,11 @@ func (c *Client) Shutdown(ctx context.Context) error {
 		c.metrics.Close()
 	}
 
-	conn.Close()
+	if c.cl.blockRebalance {
+		conn.CloseAllowingRebalance()
+	} else {
+		conn.Close()
+	}
 
 	return err
 }
