@@ -163,10 +163,10 @@ func (g *GroupTransactSession) registerMetrics(metrics Metrics) error {
 }
 
 func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
 
 		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
@@ -179,7 +179,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 			)
 
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
-			return
+			return nil
 		}
 
 		if handleErr != nil {
@@ -190,7 +190,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 			)
 
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
-			return
+			return nil
 		}
 
 		if !committed {
@@ -198,8 +198,10 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				logKeyConsumerGroup, g.cl.consumerGroup,
 			)
 
-			return
+			return nil
 		}
+
+		return nil
 	}
 }
 

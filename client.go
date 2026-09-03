@@ -301,22 +301,40 @@ func shouldRetryAbortAfterCommit(err error) bool {
 }
 
 func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
+
+		retries := 0
 
 		for {
 			select {
 			case <-c.cl.exitCh:
-				return
+				return nil
 			default:
 			}
 
 			if err := c.handleRecords(ctx, records, handler); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+
+				select {
+				case <-c.cl.exitCh:
+					return nil
+				default:
+				}
+
+				if c.cl.maxHandlerRetries > 0 && retries >= c.cl.maxHandlerRetries {
+					return fmt.Errorf("kafka: handler retries exhausted after %d retries: %w", retries, err)
+				}
+
+				retries++
+
 				if !c.cl.wait(ctx, c.cl.suspendProcessingTimeout) {
-					return
+					return nil
 				}
 
 				continue
@@ -329,7 +347,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				c.cl.Client().MarkCommitRecords(records...)
 			}
 
-			return
+			return nil
 		}
 	}
 }
@@ -358,22 +376,24 @@ func (c *Client) commitOffsets(ctx context.Context) {
 }
 
 func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
 
 		select {
 		case <-c.cl.exitCh:
-			return
+			return nil
 		default:
 			if err := c.handleRecords(ctx, records, handler); err != nil {
 				c.ackRecords(ctx, records, true)
-				return
+				return nil
 			}
 			c.ackRecords(ctx, records, false)
 		}
+
+		return nil
 	}
 }
 

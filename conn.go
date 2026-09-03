@@ -14,7 +14,8 @@ import (
 )
 
 // handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
-type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
+// Returning an error stops the polling loop.
+type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches) error
 
 // conn is the minimal Kafka client interface shared by Client and GroupTransactSession.
 type conn interface {
@@ -58,6 +59,7 @@ type client struct {
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
 	suspendCommittingTimeout time.Duration
+	maxHandlerRetries        int
 
 	shareRejectAfterDeliveries int32
 	shareReleaseTimeout        time.Duration
@@ -184,9 +186,7 @@ func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error 
 		return err
 	}
 
-	c.handleFetches(ctx, fetches)
-
-	return nil
+	return c.handleFetches(ctx, fetches)
 }
 
 func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
