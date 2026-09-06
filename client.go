@@ -12,8 +12,7 @@ import (
 
 // Client provides Kafka produce and consume operations.
 type Client struct {
-	cl      *client
-	metrics MetricsRegistration
+	cl *client
 }
 
 // NewClient creates a Kafka client with the provided options.
@@ -40,10 +39,7 @@ func NewClient(opts ...Opt) (*Client, error) {
 		return nil, err
 	}
 
-	if err := c.registerMetrics(cl.metrics); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("kafka: register client metrics: %w", err)
-	}
+	cl.hooks.onNewClient(c)
 
 	return c, nil
 }
@@ -107,15 +103,6 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Stats returns a snapshot of the current client statistics.
-func (c *Client) Stats() Stats {
-	if c == nil || c.cl == nil {
-		return Stats{}
-	}
-
-	return c.cl.stats.snapshot()
-}
-
 func (c *Client) HandleFetches(ctx context.Context) error {
 	return c.cl.HandleFetches(ctx)
 }
@@ -137,11 +124,23 @@ func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 // The transaction is committed when fn returns nil. It is aborted when fn returns an error.
 // Panics are recovered only long enough to abort the transaction, then re-thrown.
 func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
+	ctx = c.cl.hooks.onTransactionStart(ctx, TransactionTypeProducer)
 	startTime := time.Now()
-	outcome := transactionOutcomeError
+	outcome := TransactionOutcomeError
+	var hookErr error
 
 	defer func() {
-		c.cl.stats.recordTransaction(outcome, time.Since(startTime))
+		if hookErr == nil {
+			hookErr = err
+		}
+
+		c.cl.hooks.onTransactionEnd(
+			ctx,
+			TransactionTypeProducer,
+			outcome,
+			time.Since(startTime),
+			hookErr,
+		)
 	}()
 
 	if fn == nil {
@@ -158,6 +157,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
+			hookErr = fmt.Errorf("kafka: transaction panic: %v", r)
 			c.cl.log(kgo.LogLevelError, "panic recovered in kafka transaction, aborting", logKeyError, r)
 
 			if shouldAbort {
@@ -166,7 +166,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 						logKeyError, abortErr,
 					)
 				} else {
-					outcome = transactionOutcomeAbort
+					outcome = TransactionOutcomeAbort
 				}
 			}
 
@@ -181,7 +181,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
 				err = fmt.Errorf("kafka: transaction failed: %w; abort failed: %w", err, abortErr)
 			} else {
-				outcome = transactionOutcomeAbort
+				outcome = TransactionOutcomeAbort
 			}
 		}
 	}()
@@ -211,58 +211,52 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		return fmt.Errorf("kafka: commit transaction: %w", err)
 	}
 
-	outcome = transactionOutcomeCommit
+	outcome = TransactionOutcomeCommit
 	return nil
 }
 
 // Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
 func (c *Client) Shutdown(ctx context.Context) error {
-	c.cl.Close()
+	didShutdown := false
+	defer func() {
+		if didShutdown {
+			c.cl.hooks.onClientClosed(c)
+		}
+	}()
 
-	if c.cl.conn == nil {
-		return nil
-	}
+	c.cl.shutdownOnce.Do(func() {
+		didShutdown = true
+		close(c.cl.exitCh)
 
-	conn := c.cl.Client()
+		if c.cl.conn == nil {
+			return
+		}
 
-	var err error
+		conn := c.cl.Client()
 
-	if flushErr := conn.Flush(ctx); flushErr != nil {
-		c.cl.log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
-		err = errors.Join(err, flushErr)
-	}
+		var err error
 
-	if flushErr := conn.FlushAcks(ctx); flushErr != nil {
-		c.cl.stats.recordShareAckError()
-		c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
-		err = errors.Join(err, flushErr)
-	}
+		if flushErr := conn.Flush(ctx); flushErr != nil {
+			c.cl.log(kgo.LogLevelError, "error flushing producer records", logKeyError, flushErr)
+			err = errors.Join(err, flushErr)
+		}
 
-	if c.metrics != nil {
-		c.metrics.Close()
-	}
+		if flushErr := conn.FlushAcks(ctx); flushErr != nil {
+			c.cl.hooks.onShareAckError(ctx, flushErr)
+			c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
+			err = errors.Join(err, flushErr)
+		}
 
-	if c.cl.blockRebalance {
-		conn.CloseAllowingRebalance()
-	} else {
-		conn.Close()
-	}
+		c.cl.shutdownErr = err
 
-	return err
-}
+		if c.cl.blockRebalance {
+			conn.CloseAllowingRebalance()
+		} else {
+			conn.Close()
+		}
+	})
 
-func (c *Client) registerMetrics(metrics Metrics) error {
-	if metrics == nil {
-		return nil
-	}
-
-	registration, err := metrics.Register(c)
-	if err != nil {
-		return err
-	}
-
-	c.metrics = registration
-	return nil
+	return c.cl.shutdownErr
 }
 
 func (c *Client) abortTransaction(ctx context.Context) error {
@@ -316,6 +310,10 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			default:
 			}
 
+			if retries > 0 {
+				c.cl.hooks.onHandleRetry(ctx, retries)
+			}
+
 			if err := c.handleRecords(ctx, records, handler); err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return ctxErr
@@ -328,6 +326,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				}
 
 				if c.cl.maxHandlerRetries > 0 && retries >= c.cl.maxHandlerRetries {
+					c.cl.hooks.onHandleRetryExhausted(ctx, retries, err)
 					return fmt.Errorf("kafka: handler retries exhausted after %d retries: %w", retries, err)
 				}
 
@@ -361,7 +360,7 @@ func (c *Client) commitOffsets(ctx context.Context) {
 
 	for {
 		if err := conn.CommitUncommittedOffsets(ctx); err != nil {
-			c.cl.stats.recordOffsetCommitError()
+			c.cl.hooks.onOffsetCommitError(ctx, err)
 			c.cl.log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
@@ -398,7 +397,10 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 }
 
 func (c *Client) ackRecords(ctx context.Context, records []*kgo.Record, isError bool) {
-	var hasRelease bool
+	var (
+		hasRelease                             bool
+		acceptCount, releaseCount, rejectCount int
+	)
 
 	for _, record := range records {
 		status := kgo.AckAccept
@@ -414,7 +416,20 @@ func (c *Client) ackRecords(ctx context.Context, records []*kgo.Record, isError 
 		}
 
 		record.Ack(status)
+
+		switch status {
+		case kgo.AckAccept:
+			acceptCount++
+		case kgo.AckRelease:
+			releaseCount++
+		case kgo.AckReject:
+			rejectCount++
+		}
 	}
+
+	c.cl.hooks.onShareAck(ctx, ShareAckAccept, acceptCount)
+	c.cl.hooks.onShareAck(ctx, ShareAckRelease, releaseCount)
+	c.cl.hooks.onShareAck(ctx, ShareAckReject, rejectCount)
 
 	if hasRelease && c.cl.shareReleaseTimeout > 0 {
 		timer := time.NewTimer(c.cl.shareReleaseTimeout)
@@ -434,7 +449,7 @@ func (c *Client) flushAcks(ctx context.Context) {
 
 	for {
 		if err := conn.FlushAcks(ctx); err != nil {
-			c.cl.stats.recordShareAckError()
+			c.cl.hooks.onShareAckError(ctx, err)
 			c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
@@ -449,6 +464,7 @@ func (c *Client) flushAcks(ctx context.Context) {
 }
 
 func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
+	ctx = c.cl.hooks.onHandleStart(ctx, len(records))
 	startTime := time.Now()
 
 	defer func() {
@@ -456,7 +472,7 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 
-		c.cl.stats.recordHandle(len(records), time.Since(startTime), err)
+		c.cl.hooks.onHandleEnd(ctx, len(records), time.Since(startTime), err)
 
 		if err != nil {
 			c.cl.log(kgo.LogLevelError, "error handling records",

@@ -1,6 +1,7 @@
 package xkafka
 
 import (
+	"errors"
 	"maps"
 	"strings"
 	"time"
@@ -64,13 +65,38 @@ func WithLabels(labels map[string]string) Opt {
 	}}
 }
 
-// WithMetrics attaches one metrics implementation to the client or group transaction session.
+// WithHooks adds hooks for xkafka runtime events.
 //
-// Metrics are registered during creation and unregistered automatically during Shutdown.
-func WithMetrics(metrics Metrics) Opt {
+// A hook may implement any number of the hook interfaces defined by this
+// package. Hooks are called in registration order.
+func WithHooks(hooks ...Hook) Opt {
 	return clientOpt{fn: func(c *client) {
-		c.metrics = metrics
+		c.hooks = append(c.hooks, hooks...)
 	}}
+}
+
+// processHooks inspects and recursively unpacks slices of hooks, stopping if
+// the instance implements any hook interface. It returns an error on the first
+// instance that implements no hook interface.
+func processHooks(hooks []Hook) ([]Hook, error) {
+	var processedHooks []Hook
+
+	for _, hook := range hooks {
+		if implementsAnyHook(hook) {
+			processedHooks = append(processedHooks, hook)
+		} else if moreHooks, ok := hook.([]Hook); ok {
+			more, err := processHooks(moreHooks)
+			if err != nil {
+				return nil, err
+			}
+
+			processedHooks = append(processedHooks, more...)
+		} else {
+			return nil, errors.New("found an argument that implements no hook interfaces")
+		}
+	}
+
+	return processedHooks, nil
 }
 
 // WithLogger sets the logger used by xkafka and franz-go.

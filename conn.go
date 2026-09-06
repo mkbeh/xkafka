@@ -38,9 +38,9 @@ type client struct {
 	fmt    *kgo.RecordFormatter
 	logger kgo.Logger
 
-	name    string
-	labels  map[string]string
-	metrics Metrics
+	name   string
+	labels map[string]string
+	hooks  hooks
 
 	promiseFunc    PromiseFunc
 	defaultPromise PromiseFunc
@@ -66,11 +66,10 @@ type client struct {
 
 	kafkaOpts []kgo.Opt
 
-	stats statsCollector
-
-	polling   atomic.Bool
-	closeOnce sync.Once
-	exitCh    chan struct{}
+	polling      atomic.Bool
+	shutdownOnce sync.Once
+	shutdownErr  error
+	exitCh       chan struct{}
 }
 
 func newClient(opts ...Opt) (*client, error) {
@@ -88,6 +87,12 @@ func newClient(opts ...Opt) (*client, error) {
 	for _, opt := range opts {
 		opt.apply(c)
 	}
+
+	processedHooks, err := processHooks(c.hooks)
+	if err != nil {
+		return nil, err
+	}
+	c.hooks = processedHooks
 
 	c.applyName()
 
@@ -127,7 +132,7 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	results := c.conn.ProduceSync(ctx, records...)
 	for _, r := range results {
 		if r.Err != nil {
-			c.stats.recordProduceError()
+			c.hooks.onProduceError(r.Err)
 			c.log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
 		}
 	}
@@ -182,20 +187,20 @@ func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error 
 		return err
 	}
 
-	if err := c.handleFetchErrors(fetches); err != nil {
+	if err := c.handleFetchErrors(ctx, fetches); err != nil {
 		return err
 	}
 
 	return c.handleFetches(ctx, fetches)
 }
 
-func (c *client) handleFetchErrors(fetches kgo.Fetches) error {
+func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) error {
 	var firstErr error
 	var firstTopic string
 	var firstPartition int32
 
 	fetches.EachError(func(topic string, partition int32, err error) {
-		c.stats.recordFetchError()
+		c.hooks.onFetchError(ctx, err)
 
 		if isRecoverableFetchError(err) {
 			c.log(kgo.LogLevelWarn, "recoverable error fetching records",
@@ -302,13 +307,6 @@ func (c *client) Session() *kgo.GroupTransactSession {
 	return conn
 }
 
-// Close stops the polling loop and is safe to call concurrently.
-func (c *client) Close() {
-	c.closeOnce.Do(func() {
-		close(c.exitCh)
-	})
-}
-
 func (c *client) Name() string {
 	if c == nil {
 		return ""
@@ -361,7 +359,7 @@ func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 
 func (c *client) loggingPromise(record *kgo.Record, err error) {
 	if err != nil {
-		c.stats.recordProduceError()
+		c.hooks.onProduceError(err)
 		c.log(kgo.LogLevelError, "kafka async producer error",
 			logKeyError, err,
 			logKeyRecord, c.formatRecord(record),

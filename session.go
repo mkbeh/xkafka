@@ -14,8 +14,7 @@ import (
 // It is intended for Kafka-to-Kafka consume-process-produce flows where consumed
 // offsets and produced records must be committed atomically.
 type GroupTransactSession struct {
-	cl      *client
-	metrics MetricsRegistration
+	cl *client
 }
 
 // NewGroupTransactSession creates a Kafka group transaction session.
@@ -42,10 +41,7 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 		return nil, err
 	}
 
-	if err := g.registerMetrics(cl.metrics); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("kafka: register group transact session metrics: %w", err)
-	}
+	cl.hooks.onNewGroupTransactSession(g)
 
 	return g, nil
 }
@@ -99,15 +95,6 @@ func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Stats returns a snapshot of the current session statistics.
-func (g *GroupTransactSession) Stats() Stats {
-	if g == nil || g.cl == nil {
-		return Stats{}
-	}
-
-	return g.cl.stats.snapshot()
-}
-
 func (g *GroupTransactSession) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.Produce(ctx, record, promise)
 }
@@ -130,36 +117,30 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 		return nil
 	}
 
-	g.cl.Close()
+	didShutdown := false
+	defer func() {
+		if didShutdown {
+			g.cl.hooks.onGroupTransactSessionClosed(g)
+		}
+	}()
 
-	if g.metrics != nil {
-		g.metrics.Close()
-	}
+	g.cl.shutdownOnce.Do(func() {
+		didShutdown = true
+		close(g.cl.exitCh)
 
-	if g.cl.conn != nil {
+		if g.cl.conn == nil {
+			return
+		}
+
 		conn := g.cl.Session()
 		if g.cl.blockRebalance {
 			conn.CloseAllowingRebalance()
 		} else {
 			conn.Close()
 		}
-	}
+	})
 
-	return nil
-}
-
-func (g *GroupTransactSession) registerMetrics(metrics Metrics) error {
-	if metrics == nil {
-		return nil
-	}
-
-	registration, err := metrics.Register(g)
-	if err != nil {
-		return err
-	}
-
-	g.metrics = registration
-	return nil
+	return g.cl.shutdownErr
 }
 
 func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) handleFetchesFunc {
@@ -210,11 +191,31 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	records []*kgo.Record,
 	handler BatchTxHandlerFunc,
 ) (committed bool, handleErr, txErr error) {
+	ctx = g.cl.hooks.onTransactionStart(ctx, TransactionTypeGroup)
 	conn := g.cl.Session()
 	transactionStart := time.Now()
 
 	defer func() {
-		g.cl.stats.recordGroupTransaction(committed, txErr, time.Since(transactionStart))
+		outcome := TransactionOutcomeAbort
+		switch {
+		case txErr != nil:
+			outcome = TransactionOutcomeError
+		case committed:
+			outcome = TransactionOutcomeCommit
+		}
+
+		hookErr := txErr
+		if hookErr == nil {
+			hookErr = handleErr
+		}
+
+		g.cl.hooks.onTransactionEnd(
+			ctx,
+			TransactionTypeGroup,
+			outcome,
+			time.Since(transactionStart),
+			hookErr,
+		)
 	}()
 
 	if err := conn.Begin(); err != nil {
@@ -244,6 +245,7 @@ func (g *GroupTransactSession) handleRecords(
 	tx *Tx,
 	handler BatchTxHandlerFunc,
 ) (err error) {
+	ctx = g.cl.hooks.onHandleStart(ctx, len(records))
 	startTime := time.Now()
 
 	defer func() {
@@ -251,7 +253,7 @@ func (g *GroupTransactSession) handleRecords(
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 
-		g.cl.stats.recordHandle(len(records), time.Since(startTime), err)
+		g.cl.hooks.onHandleEnd(ctx, len(records), time.Since(startTime), err)
 	}()
 
 	return handler(ctx, records, tx)
