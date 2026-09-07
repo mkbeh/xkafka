@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 type hookContextKey string
@@ -16,18 +18,18 @@ type testHandleHook struct {
 	ends   *[]string
 }
 
-func (h *testHandleHook) OnHandleStart(ctx context.Context, _ int) context.Context {
+func (h *testHandleHook) OnHandleStart(ctx context.Context, _ []*kgo.Record) context.Context {
 	*h.starts = append(*h.starts, h.name)
 	return context.WithValue(ctx, hookContextKey(h.name), true)
 }
 
 func (h *testHandleHook) OnHandleEnd(
 	ctx context.Context,
-	_ int,
+	_ []*kgo.Record,
 	_ time.Duration,
 	_ error,
 ) {
-	if ctx.Value(hookContextKey(h.name)) == true {
+	if marked, _ := ctx.Value(hookContextKey(h.name)).(bool); marked {
 		*h.ends = append(*h.ends, h.name)
 	}
 }
@@ -53,7 +55,7 @@ func (h *testTransactionHook) OnTransactionEnd(
 	_ time.Duration,
 	_ error,
 ) {
-	if ctx.Value(hookContextKey(h.name)) == true {
+	if marked, _ := ctx.Value(hookContextKey(h.name)).(bool); marked {
 		*h.ends = append(*h.ends, h.name)
 	}
 }
@@ -88,19 +90,88 @@ func (h *testShareAckHook) OnShareAck(_ context.Context, outcome ShareAckOutcome
 	})
 }
 
-type testRetryHook struct {
-	retries   []int
-	exhausted []int
-	err       error
+type testKafkaErrorHook struct {
+	produceRecord    *kgo.Record
+	produceErr       error
+	fetchTopic       string
+	fetchPartition   int32
+	fetchRecoverable bool
+	fetchErr         error
 }
 
-func (h *testRetryHook) OnHandleRetry(_ context.Context, retry int) {
-	h.retries = append(h.retries, retry)
+func (h *testKafkaErrorHook) OnProduceError(record *kgo.Record, err error) {
+	h.produceRecord = record
+	h.produceErr = err
 }
 
-func (h *testRetryHook) OnHandleRetryExhausted(_ context.Context, retries int, err error) {
-	h.exhausted = append(h.exhausted, retries)
-	h.err = err
+func (h *testKafkaErrorHook) OnFetchError(
+	_ context.Context,
+	topic string,
+	partition int32,
+	recoverable bool,
+	err error,
+) {
+	h.fetchTopic = topic
+	h.fetchPartition = partition
+	h.fetchRecoverable = recoverable
+	h.fetchErr = err
+}
+
+type testOperationHook struct {
+	offsetCommitDuration time.Duration
+	offsetCommitErr      error
+	shareAckDuration     time.Duration
+	shareAckErr          error
+}
+
+func (h *testOperationHook) OnOffsetCommit(
+	_ context.Context,
+	duration time.Duration,
+	err error,
+) {
+	h.offsetCommitDuration = duration
+	h.offsetCommitErr = err
+}
+
+func (h *testOperationHook) OnShareAckFlush(
+	_ context.Context,
+	duration time.Duration,
+	err error,
+) {
+	h.shareAckDuration = duration
+	h.shareAckErr = err
+}
+
+func TestHooksKafkaErrorContext(t *testing.T) {
+	hook := &testKafkaErrorHook{}
+	hookSet := hooks{hook}
+
+	record := &kgo.Record{Topic: "orders", Partition: 3}
+	produceErr := errors.New("produce failed")
+	hookSet.onProduceError(record, produceErr)
+
+	if hook.produceRecord != record {
+		t.Fatalf("produce record = %p, want %p", hook.produceRecord, record)
+	}
+	if !errors.Is(hook.produceErr, produceErr) {
+		t.Fatalf("produce error = %v, want %v", hook.produceErr, produceErr)
+	}
+
+	fetchErr := errors.New("fetch failed")
+	hookSet.onFetchError(context.Background(), "payments", 7, true, fetchErr)
+
+	if hook.fetchTopic != "payments" {
+		t.Fatalf("fetch topic = %q, want payments", hook.fetchTopic)
+	}
+	if hook.fetchPartition != 7 {
+		t.Fatalf("fetch partition = %d, want 7", hook.fetchPartition)
+	}
+	if !hook.fetchRecoverable {
+		t.Fatal("fetch recoverable = false, want true")
+	}
+	if !errors.Is(hook.fetchErr, fetchErr) {
+		t.Fatalf("fetch error = %v, want %v", hook.fetchErr, fetchErr)
+	}
 }
 
 func TestHooksHandleContext(t *testing.T) {
@@ -110,8 +181,9 @@ func TestHooksHandleContext(t *testing.T) {
 	second := &testHandleHook{name: "second", starts: &starts, ends: &ends}
 	hookSet := hooks{first, second}
 
-	ctx := hookSet.onHandleStart(context.Background(), 3)
-	hookSet.onHandleEnd(ctx, 3, time.Second, nil)
+	records := []*kgo.Record{{Topic: "orders"}, {Topic: "payments"}}
+	ctx := hookSet.onHandleStart(context.Background(), records)
+	hookSet.onHandleEnd(ctx, records, time.Second, nil)
 
 	if want := []string{"first", "second"}; !reflect.DeepEqual(starts, want) {
 		t.Fatalf("start order = %v, want %v", starts, want)
@@ -202,24 +274,28 @@ func TestHooksShareAckSkipsZero(t *testing.T) {
 	}
 }
 
-func TestHooksRetry(t *testing.T) {
-	hook := &testRetryHook{}
+func TestHooksOperations(t *testing.T) {
+	hook := &testOperationHook{}
 	hookSet := hooks{hook}
 
-	hookSet.onHandleRetry(context.Background(), 1)
-	hookSet.onHandleRetry(context.Background(), 2)
+	offsetErr := errors.New("offset commit failed")
+	hookSet.onOffsetCommit(context.Background(), 150*time.Millisecond, offsetErr)
 
-	err := errors.New("handler failed")
-	hookSet.onHandleRetryExhausted(context.Background(), 2, err)
+	if hook.offsetCommitDuration != 150*time.Millisecond {
+		t.Fatalf("offset commit duration = %s, want 150ms", hook.offsetCommitDuration)
+	}
+	if !errors.Is(hook.offsetCommitErr, offsetErr) {
+		t.Fatalf("offset commit error = %v, want %v", hook.offsetCommitErr, offsetErr)
+	}
 
-	if want := []int{1, 2}; !reflect.DeepEqual(hook.retries, want) {
-		t.Fatalf("retries = %v, want %v", hook.retries, want)
+	ackErr := errors.New("share ack flush failed")
+	hookSet.onShareAckFlush(context.Background(), 250*time.Millisecond, ackErr)
+
+	if hook.shareAckDuration != 250*time.Millisecond {
+		t.Fatalf("share ack duration = %s, want 250ms", hook.shareAckDuration)
 	}
-	if want := []int{2}; !reflect.DeepEqual(hook.exhausted, want) {
-		t.Fatalf("exhausted = %v, want %v", hook.exhausted, want)
-	}
-	if !errors.Is(hook.err, err) {
-		t.Fatalf("exhausted error = %v, want %v", hook.err, err)
+	if !errors.Is(hook.shareAckErr, ackErr) {
+		t.Fatalf("share ack error = %v, want %v", hook.shareAckErr, ackErr)
 	}
 }
 

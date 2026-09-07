@@ -132,7 +132,7 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	results := c.conn.ProduceSync(ctx, records...)
 	for _, r := range results {
 		if r.Err != nil {
-			c.hooks.onProduceError(r.Err)
+			c.hooks.onProduceError(r.Record, r.Err)
 			c.log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
 		}
 	}
@@ -200,9 +200,10 @@ func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) err
 	var firstPartition int32
 
 	fetches.EachError(func(topic string, partition int32, err error) {
-		c.hooks.onFetchError(ctx, err)
+		recoverable := isRecoverableFetchError(err)
+		c.hooks.onFetchError(ctx, topic, partition, recoverable, err)
 
-		if isRecoverableFetchError(err) {
+		if recoverable {
 			c.log(kgo.LogLevelWarn, "recoverable error fetching records",
 				logKeyError, err,
 				logKeyTopic, topic,
@@ -359,7 +360,7 @@ func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 
 func (c *client) loggingPromise(record *kgo.Record, err error) {
 	if err != nil {
-		c.hooks.onProduceError(err)
+		c.hooks.onProduceError(record, err)
 		c.log(kgo.LogLevelError, "kafka async producer error",
 			logKeyError, err,
 			logKeyRecord, c.formatRecord(record),

@@ -3,6 +3,8 @@ package xkafka
 import (
 	"context"
 	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 ///////////////////////////////////////////////////////////////
@@ -18,7 +20,8 @@ import (
 // If so, the hook is called.
 //
 // This allows hooks to implement only the behavior they care about, and allows
-// xkafka to add more hooks in the future. Hooks must be safe for concurrent use.
+// xkafka to add more hooks in the future. Hooks must be safe for concurrent use
+// and are expected to be fast.
 type Hook any
 
 type hooks []Hook
@@ -51,44 +54,40 @@ type HookGroupTransactSessionClosed interface {
 
 // HookProduceError is called when producing a record fails.
 type HookProduceError interface {
-	OnProduceError(err error)
+	OnProduceError(record *kgo.Record, err error)
 }
 
 // HookFetchError is called when fetching records fails.
 type HookFetchError interface {
-	OnFetchError(ctx context.Context, err error)
+	OnFetchError(
+		ctx context.Context,
+		topic string,
+		partition int32,
+		recoverable bool,
+		err error,
+	)
 }
 
-// HookOffsetCommitError is called when committing consumer offsets fails.
-type HookOffsetCommitError interface {
-	OnOffsetCommitError(ctx context.Context, err error)
+// HookOffsetCommit is called after a consumer offset commit attempt ends.
+type HookOffsetCommit interface {
+	OnOffsetCommit(ctx context.Context, duration time.Duration, err error)
 }
 
 // HookHandleStart is called before records are passed to the configured handler.
 //
 // The returned context is passed to subsequent handler hooks and to the handler.
 type HookHandleStart interface {
-	OnHandleStart(ctx context.Context, recordCount int) context.Context
+	OnHandleStart(ctx context.Context, records []*kgo.Record) context.Context
 }
 
 // HookHandleEnd is called after the configured handler returns.
 type HookHandleEnd interface {
 	OnHandleEnd(
 		ctx context.Context,
-		recordCount int,
+		records []*kgo.Record,
 		duration time.Duration,
 		err error,
 	)
-}
-
-// HookHandleRetry is called before retrying a failed handler invocation.
-type HookHandleRetry interface {
-	OnHandleRetry(ctx context.Context, retry int)
-}
-
-// HookHandleRetryExhausted is called when handler retries are exhausted.
-type HookHandleRetryExhausted interface {
-	OnHandleRetryExhausted(ctx context.Context, retries int, err error)
 }
 
 // ShareAckOutcome describes the outcome of a Share Group acknowledgement.
@@ -100,7 +99,8 @@ const (
 	ShareAckReject  ShareAckOutcome = "reject"
 )
 
-// HookShareAck is called when Share Group records are acknowledged.
+// HookShareAck is called when acknowledgement outcomes are assigned to
+// Share Group records.
 type HookShareAck interface {
 	OnShareAck(
 		ctx context.Context,
@@ -109,9 +109,9 @@ type HookShareAck interface {
 	)
 }
 
-// HookShareAckError is called when flushing Share Group acknowledgements fails.
-type HookShareAckError interface {
-	OnShareAckError(ctx context.Context, err error)
+// HookShareAckFlush is called after a Share Group acknowledgement flush attempt ends.
+type HookShareAckFlush interface {
+	OnShareAckFlush(ctx context.Context, duration time.Duration, err error)
 }
 
 // TransactionType identifies the xkafka transaction runtime.
@@ -131,7 +131,7 @@ const (
 	TransactionOutcomeError  TransactionOutcome = "error"
 )
 
-// HookTransactionStart is called when a transaction starts.
+// HookTransactionStart is called when a transaction attempt starts.
 //
 // The returned context is passed to subsequent transaction hooks and transaction
 // processing.
@@ -142,7 +142,7 @@ type HookTransactionStart interface {
 	) context.Context
 }
 
-// HookTransactionEnd is called when a transaction ends.
+// HookTransactionEnd is called when a transaction attempt ends.
 type HookTransactionEnd interface {
 	OnTransactionEnd(
 		ctx context.Context,
@@ -185,34 +185,40 @@ func (hs hooks) onGroupTransactSessionClosed(session *GroupTransactSession) {
 	})
 }
 
-func (hs hooks) onProduceError(err error) {
+func (hs hooks) onProduceError(record *kgo.Record, err error) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookProduceError); ok {
-			h.OnProduceError(err)
+			h.OnProduceError(record, err)
 		}
 	})
 }
 
-func (hs hooks) onFetchError(ctx context.Context, err error) {
+func (hs hooks) onFetchError(
+	ctx context.Context,
+	topic string,
+	partition int32,
+	recoverable bool,
+	err error,
+) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookFetchError); ok {
-			h.OnFetchError(ctx, err)
+			h.OnFetchError(ctx, topic, partition, recoverable, err)
 		}
 	})
 }
 
-func (hs hooks) onOffsetCommitError(ctx context.Context, err error) {
+func (hs hooks) onOffsetCommit(ctx context.Context, duration time.Duration, err error) {
 	hs.each(func(h Hook) {
-		if h, ok := h.(HookOffsetCommitError); ok {
-			h.OnOffsetCommitError(ctx, err)
+		if h, ok := h.(HookOffsetCommit); ok {
+			h.OnOffsetCommit(ctx, duration, err)
 		}
 	})
 }
 
-func (hs hooks) onHandleStart(ctx context.Context, recordCount int) context.Context {
+func (hs hooks) onHandleStart(ctx context.Context, records []*kgo.Record) context.Context {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookHandleStart); ok {
-			ctx = h.OnHandleStart(ctx, recordCount)
+			ctx = h.OnHandleStart(ctx, records)
 		}
 	})
 
@@ -221,29 +227,13 @@ func (hs hooks) onHandleStart(ctx context.Context, recordCount int) context.Cont
 
 func (hs hooks) onHandleEnd(
 	ctx context.Context,
-	recordCount int,
+	records []*kgo.Record,
 	duration time.Duration,
 	err error,
 ) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookHandleEnd); ok {
-			h.OnHandleEnd(ctx, recordCount, duration, err)
-		}
-	})
-}
-
-func (hs hooks) onHandleRetry(ctx context.Context, retry int) {
-	hs.each(func(h Hook) {
-		if h, ok := h.(HookHandleRetry); ok {
-			h.OnHandleRetry(ctx, retry)
-		}
-	})
-}
-
-func (hs hooks) onHandleRetryExhausted(ctx context.Context, retries int, err error) {
-	hs.each(func(h Hook) {
-		if h, ok := h.(HookHandleRetryExhausted); ok {
-			h.OnHandleRetryExhausted(ctx, retries, err)
+			h.OnHandleEnd(ctx, records, duration, err)
 		}
 	})
 }
@@ -264,10 +254,10 @@ func (hs hooks) onShareAck(
 	})
 }
 
-func (hs hooks) onShareAckError(ctx context.Context, err error) {
+func (hs hooks) onShareAckFlush(ctx context.Context, duration time.Duration, err error) {
 	hs.each(func(h Hook) {
-		if h, ok := h.(HookShareAckError); ok {
-			h.OnShareAckError(ctx, err)
+		if h, ok := h.(HookShareAckFlush); ok {
+			h.OnShareAckFlush(ctx, duration, err)
 		}
 	})
 }
@@ -308,13 +298,11 @@ func implementsAnyHook(h Hook) bool {
 		HookGroupTransactSessionClosed,
 		HookProduceError,
 		HookFetchError,
-		HookOffsetCommitError,
+		HookOffsetCommit,
 		HookHandleStart,
 		HookHandleEnd,
-		HookHandleRetry,
-		HookHandleRetryExhausted,
 		HookShareAck,
-		HookShareAckError,
+		HookShareAckFlush,
 		HookTransactionStart,
 		HookTransactionEnd:
 		return true

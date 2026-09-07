@@ -1,9 +1,10 @@
-# OpenTelemetry Metrics for xkafka
+# OpenTelemetry for xkafka
 
-`otelxkafka` provides optional OpenTelemetry metrics integration for `xkafka`.
+`otelxkafka` provides optional OpenTelemetry metrics and tracing for `xkafka` runtime behavior through the xkafka hook API.
 
-The package is exporter-agnostic: applications own the OpenTelemetry SDK lifecycle and exporter configuration, while
-`otelxkafka` reads lightweight `xkafka.Stats` snapshots and exposes them through OpenTelemetry observable metrics.
+It complements `franz-go/plugin/kotel`: native `kotel` hooks instrument franz-go client and record operations, while `otelxkafka` instruments xkafka handler processing, settlement operations, Share Group acknowledgements, and transactions.
+
+Applications own the OpenTelemetry SDK lifecycle and exporter configuration.
 
 ## Installation
 
@@ -16,47 +17,74 @@ go get github.com/mkbeh/xkafka/extra/otelxkafka
 <!-- @formatter:off -->
 ```go
 import (
-	"context"
+    "context"
 
-	"github.com/mkbeh/xkafka"
-	"github.com/mkbeh/xkafka/extra/otelxkafka"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+    "github.com/mkbeh/xkafka"
+    "github.com/mkbeh/xkafka/extra/otelxkafka"
+    "go.opentelemetry.io/otel/propagation"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 meterProvider := sdkmetric.NewMeterProvider()
 defer meterProvider.Shutdown(context.Background())
 
-// Create one reusable OpenTelemetry metrics integration.
-metrics, err := otelxkafka.New(
-	otelxkafka.WithMeterProvider(meterProvider),
-)
-if err != nil {
-	return err
-}
+tracerProvider := sdktrace.NewTracerProvider()
+defer tracerProvider.Shutdown(context.Background())
 
-orders, err := xkafka.NewClient(
-	xkafka.WithName("orders"),
-	xkafka.WithLabel("service", "orders-api"),
-	xkafka.WithMetrics(metrics),
+propagator := propagation.NewCompositeTextMapPropagator(
+    propagation.TraceContext{},
+    propagation.Baggage{},
 )
-if err != nil {
-	return err
-}
-defer orders.Shutdown(context.Background())
 
-billing, err := xkafka.NewClient(
-	xkafka.WithName("billing"),
-	xkafka.WithLabel("service", "billing-api"),
-	xkafka.WithMetrics(metrics),
+telemetry := otelxkafka.NewKotel(
+    otelxkafka.WithMeter(
+        otelxkafka.NewMeter(
+            otelxkafka.MeterProvider(meterProvider),
+        ),
+    ),
+    otelxkafka.WithTracer(
+        otelxkafka.NewTracer(
+            otelxkafka.TracerProvider(tracerProvider),
+            otelxkafka.TracerPropagator(propagator),
+        ),
+    ),
+)
+
+client, err := xkafka.NewClient(
+    xkafka.WithName("orders"),
+    xkafka.WithLabel("service", "orders-api"),
+    xkafka.WithHooks(telemetry.Hooks()...),
 )
 if err != nil {
-	return err
+    return err
 }
-defer billing.Shutdown(context.Background())
+defer client.Shutdown(context.Background())
 ```
 <!-- @formatter:on -->
 
-`Metrics` is safe to reuse across multiple clients and group transaction sessions. Each source is registered during
-creation and unregistered automatically during `Shutdown`.
+`Kotel` can be reused across multiple clients and group transaction sessions. Every call to `Hooks` returns runtime-scoped `Meter` and `Tracer` hook instances, so client metadata remains isolated.
 
-Names and labels are exported as metric attributes and should remain stable and low-cardinality.
+`WithName` is exported as `messaging.client.id`. Custom labels are exported as OpenTelemetry attributes except for reserved attributes owned by the instrumentation. Keep labels stable and low-cardinality.
+
+## Metrics
+
+`Meter` exports xkafka runtime metrics such as:
+
+```text
+xkafka.produce.errors
+xkafka.fetch.errors
+messaging.process.duration
+xkafka.handler.records
+messaging.client.operation.duration
+xkafka.share.ack.records
+xkafka.transaction.duration
+```
+
+Native franz-go client metrics are intentionally left to `franz-go/plugin/kotel.Meter` to avoid duplicating broker, byte, and record telemetry.
+
+## Tracing
+
+`Tracer` adds xkafka runtime spans for handler processing, offset commit and Share Group acknowledgement settlement, and transaction attempts.
+
+For end-to-end Kafka record tracing and header propagation, use it together with `franz-go/plugin/kotel.Tracer` and configure both tracers with the same `TextMapPropagator`.

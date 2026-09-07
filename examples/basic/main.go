@@ -51,14 +51,6 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func statsHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if err := json.NewEncoder(w).Encode(client.Stats()); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
 func handleRecords(_ context.Context, records []*kgo.Record) error {
 	for _, record := range records {
 		var msg message
@@ -127,7 +119,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /produce", produceHandler)
-	mux.HandleFunc("GET /stats", statsHandler)
 
 	server := &http.Server{
 		Addr:              httpAddr,

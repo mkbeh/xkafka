@@ -91,6 +91,24 @@ func (c *Client) Labels() map[string]string {
 	return c.cl.Labels()
 }
 
+// ConsumerGroup returns the configured consumer group.
+func (c *Client) ConsumerGroup() string {
+	if c == nil || c.cl == nil {
+		return ""
+	}
+
+	return c.cl.consumerGroup
+}
+
+// ShareGroup returns the configured Share Group.
+func (c *Client) ShareGroup() string {
+	if c == nil || c.cl == nil {
+		return ""
+	}
+
+	return c.cl.shareGroup
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	if c == nil || c.cl == nil || c.cl.conn == nil {
 		return fmt.Errorf("kafka: client is nil")
@@ -241,8 +259,12 @@ func (c *Client) Shutdown(ctx context.Context) error {
 			err = errors.Join(err, flushErr)
 		}
 
-		if flushErr := conn.FlushAcks(ctx); flushErr != nil {
-			c.cl.hooks.onShareAckError(ctx, flushErr)
+		ackStart := time.Now()
+		flushErr := conn.FlushAcks(ctx)
+		if c.cl.shareGroup != "" {
+			c.cl.hooks.onShareAckFlush(ctx, time.Since(ackStart), flushErr)
+		}
+		if flushErr != nil {
 			c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, flushErr)
 			err = errors.Join(err, flushErr)
 		}
@@ -310,11 +332,8 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			default:
 			}
 
-			if retries > 0 {
-				c.cl.hooks.onHandleRetry(ctx, retries)
-			}
-
-			if err := c.handleRecords(ctx, records, handler); err != nil {
+			handleCtx, err := c.handleRecords(ctx, records, handler)
+			if err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return ctxErr
 				}
@@ -326,7 +345,6 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				}
 
 				if c.cl.maxHandlerRetries > 0 && retries >= c.cl.maxHandlerRetries {
-					c.cl.hooks.onHandleRetryExhausted(ctx, retries, err)
 					return fmt.Errorf("kafka: handler retries exhausted after %d retries: %w", retries, err)
 				}
 
@@ -341,7 +359,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 
 			switch {
 			case c.cl.manualCommit:
-				c.commitOffsets(ctx)
+				c.commitOffsets(handleCtx)
 			case c.cl.autoCommitMarks:
 				c.cl.Client().MarkCommitRecords(records...)
 			}
@@ -359,8 +377,11 @@ func (c *Client) commitOffsets(ctx context.Context) {
 	conn := c.cl.Client()
 
 	for {
-		if err := conn.CommitUncommittedOffsets(ctx); err != nil {
-			c.cl.hooks.onOffsetCommitError(ctx, err)
+		startTime := time.Now()
+		err := conn.CommitUncommittedOffsets(ctx)
+		c.cl.hooks.onOffsetCommit(ctx, time.Since(startTime), err)
+
+		if err != nil {
 			c.cl.log(kgo.LogLevelError, "error committing offsets", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
@@ -385,60 +406,62 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 		case <-c.cl.exitCh:
 			return nil
 		default:
-			if err := c.handleRecords(ctx, records, handler); err != nil {
-				c.ackRecords(ctx, records, true)
+			handleCtx, err := c.handleRecords(ctx, records, handler)
+			if err != nil {
+				c.ackRecords(handleCtx, records, kgo.AckRelease)
 				return nil
 			}
-			c.ackRecords(ctx, records, false)
+
+			c.ackRecords(handleCtx, records, kgo.AckAccept)
 		}
 
 		return nil
 	}
 }
 
-func (c *Client) ackRecords(ctx context.Context, records []*kgo.Record, isError bool) {
+func (c *Client) ackRecords(
+	ctx context.Context,
+	records []*kgo.Record,
+	status kgo.AckStatus,
+) {
 	var (
-		hasRelease                             bool
-		acceptCount, releaseCount, rejectCount int
+		acceptCount  int
+		releaseCount int
+		rejectCount  int
 	)
 
-	for _, record := range records {
-		status := kgo.AckAccept
-
-		if isError {
-			status = kgo.AckRelease
-			if c.cl.shareRejectAfterDeliveries > 0 && record.DeliveryCount() >= c.cl.shareRejectAfterDeliveries {
-				status = kgo.AckReject
-			}
-			if status == kgo.AckRelease {
-				hasRelease = true
-			}
+	switch status {
+	case kgo.AckAccept:
+		for _, record := range records {
+			record.Ack(kgo.AckAccept)
 		}
 
-		record.Ack(status)
+		acceptCount = len(records)
 
-		switch status {
-		case kgo.AckAccept:
-			acceptCount++
-		case kgo.AckRelease:
+	case kgo.AckRelease:
+		for _, record := range records {
+			if c.cl.shareRejectAfterDeliveries > 0 &&
+				record.DeliveryCount() >= c.cl.shareRejectAfterDeliveries {
+				record.Ack(kgo.AckReject)
+				rejectCount++
+
+				continue
+			}
+
+			record.Ack(kgo.AckRelease)
 			releaseCount++
-		case kgo.AckReject:
-			rejectCount++
 		}
+
+	default:
+		panic("xkafka: invalid share ack status")
 	}
 
 	c.cl.hooks.onShareAck(ctx, ShareAckAccept, acceptCount)
 	c.cl.hooks.onShareAck(ctx, ShareAckRelease, releaseCount)
 	c.cl.hooks.onShareAck(ctx, ShareAckReject, rejectCount)
 
-	if hasRelease && c.cl.shareReleaseTimeout > 0 {
-		timer := time.NewTimer(c.cl.shareReleaseTimeout)
-		select {
-		case <-ctx.Done():
-		case <-c.cl.exitCh:
-		case <-timer.C:
-		}
-		timer.Stop()
+	if releaseCount > 0 {
+		c.cl.wait(ctx, c.cl.shareReleaseTimeout)
 	}
 
 	c.flushAcks(ctx)
@@ -448,8 +471,11 @@ func (c *Client) flushAcks(ctx context.Context) {
 	conn := c.cl.Client()
 
 	for {
-		if err := conn.FlushAcks(ctx); err != nil {
-			c.cl.hooks.onShareAckError(ctx, err)
+		startTime := time.Now()
+		err := conn.FlushAcks(ctx)
+		c.cl.hooks.onShareAckFlush(ctx, time.Since(startTime), err)
+
+		if err != nil {
 			c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
 
 			if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
@@ -463,8 +489,12 @@ func (c *Client) flushAcks(ctx context.Context) {
 	}
 }
 
-func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handler BatchHandlerFunc) (err error) {
-	ctx = c.cl.hooks.onHandleStart(ctx, len(records))
+func (c *Client) handleRecords(
+	ctx context.Context,
+	records []*kgo.Record,
+	handler BatchHandlerFunc,
+) (handleCtx context.Context, err error) {
+	handleCtx = c.cl.hooks.onHandleStart(ctx, records)
 	startTime := time.Now()
 
 	defer func() {
@@ -472,7 +502,7 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 
-		c.cl.hooks.onHandleEnd(ctx, len(records), time.Since(startTime), err)
+		c.cl.hooks.onHandleEnd(handleCtx, records, time.Since(startTime), err)
 
 		if err != nil {
 			c.cl.log(kgo.LogLevelError, "error handling records",
@@ -483,5 +513,6 @@ func (c *Client) handleRecords(ctx context.Context, records []*kgo.Record, handl
 		}
 	}()
 
-	return handler(ctx, records)
+	err = handler(handleCtx, records)
+	return handleCtx, err
 }

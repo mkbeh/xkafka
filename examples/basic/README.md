@@ -1,6 +1,6 @@
 # Basic Example
 
-This example demonstrates the core `xkafka.Client` produce and consume workflow without external metrics integrations.
+This example demonstrates the core `xkafka.Client` produce and consume workflow without external observability integrations.
 
 **This example demonstrates:**
 
@@ -8,7 +8,6 @@ This example demonstrates the core `xkafka.Client` produce and consume workflow 
 * explicitly checking broker connectivity with `Ping`;
 * synchronously producing a record;
 * consuming records through a batch handler;
-* inspecting the lightweight `Client.Stats()` snapshot;
 * graceful client shutdown.
 
 ## Local Kafka setup
@@ -76,19 +75,6 @@ consume: topic=sample-topic partition=0 offset=0 key="basic" msg={ID:42 Text:hel
 ```
 
 Partition and offset values depend on the Kafka topic state.
-
-## Statistics
-
-`xkafka` keeps lightweight cumulative statistics in the core client.
-
-```shell
-curl -s 'http://localhost:8080/stats' | jq
-```
-
-The endpoint returns the current `Client.Stats()` snapshot directly as JSON. No Prometheus or OpenTelemetry metrics
-integration is required.
-
-After producing and consuming a record, handler counters and cumulative handler duration should increase.
 
 ## Stop
 

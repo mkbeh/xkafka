@@ -83,6 +83,15 @@ func (g *GroupTransactSession) Labels() map[string]string {
 	return g.cl.Labels()
 }
 
+// ConsumerGroup returns the configured consumer group.
+func (g *GroupTransactSession) ConsumerGroup() string {
+	if g == nil || g.cl == nil {
+		return ""
+	}
+
+	return g.cl.consumerGroup
+}
+
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	if g == nil || g.cl == nil || g.cl.conn == nil {
 		return fmt.Errorf("kafka: group transact session is nil")
@@ -245,7 +254,7 @@ func (g *GroupTransactSession) handleRecords(
 	tx *Tx,
 	handler BatchTxHandlerFunc,
 ) (err error) {
-	ctx = g.cl.hooks.onHandleStart(ctx, len(records))
+	ctx = g.cl.hooks.onHandleStart(ctx, records)
 	startTime := time.Now()
 
 	defer func() {
@@ -253,7 +262,7 @@ func (g *GroupTransactSession) handleRecords(
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 
-		g.cl.hooks.onHandleEnd(ctx, len(records), time.Since(startTime), err)
+		g.cl.hooks.onHandleEnd(ctx, records, time.Since(startTime), err)
 	}()
 
 	return handler(ctx, records, tx)
