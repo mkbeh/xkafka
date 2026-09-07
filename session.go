@@ -153,10 +153,10 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 }
 
 func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) error {
+	return func(ctx context.Context, fetches kgo.Fetches) {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return nil
+			return
 		}
 
 		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
@@ -169,7 +169,7 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 			)
 
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
-			return nil
+			return
 		}
 
 		if handleErr != nil {
@@ -180,18 +180,14 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 			)
 
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
-			return nil
+			return
 		}
 
 		if !committed {
 			g.cl.log(kgo.LogLevelDebug, "group transaction aborted before commit",
 				logKeyConsumerGroup, g.cl.consumerGroup,
 			)
-
-			return nil
 		}
-
-		return nil
 	}
 }
 

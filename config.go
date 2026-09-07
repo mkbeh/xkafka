@@ -158,17 +158,6 @@ func WithSuspendProcessingTimeout(timeout time.Duration) Opt {
 	}}
 }
 
-// WithHandlerMaxRetries sets the maximum number of retries after regular consumer handler errors.
-//
-// A value of zero keeps the default unlimited retry behavior.
-func WithHandlerMaxRetries(retries int) Opt {
-	return clientOpt{fn: func(c *client) {
-		if retries >= 0 {
-			c.maxHandlerRetries = retries
-		}
-	}}
-}
-
 // WithSuspendCommittingTimeout sets the wait time after offset commit or ack errors.
 func WithSuspendCommittingTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {

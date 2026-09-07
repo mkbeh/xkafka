@@ -317,41 +317,23 @@ func shouldRetryAbortAfterCommit(err error) bool {
 }
 
 func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) error {
+	return func(ctx context.Context, fetches kgo.Fetches) {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return nil
+			return
 		}
-
-		retries := 0
 
 		for {
 			select {
 			case <-c.cl.exitCh:
-				return nil
+				return
 			default:
 			}
 
 			handleCtx, err := c.handleRecords(ctx, records, handler)
 			if err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					return ctxErr
-				}
-
-				select {
-				case <-c.cl.exitCh:
-					return nil
-				default:
-				}
-
-				if c.cl.maxHandlerRetries > 0 && retries >= c.cl.maxHandlerRetries {
-					return fmt.Errorf("kafka: handler retries exhausted after %d retries: %w", retries, err)
-				}
-
-				retries++
-
 				if !c.cl.wait(ctx, c.cl.suspendProcessingTimeout) {
-					return nil
+					return
 				}
 
 				continue
@@ -364,7 +346,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				c.cl.Client().MarkCommitRecords(records...)
 			}
 
-			return nil
+			return
 		}
 	}
 }
@@ -396,26 +378,26 @@ func (c *Client) commitOffsets(ctx context.Context) {
 }
 
 func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) error {
+	return func(ctx context.Context, fetches kgo.Fetches) {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return nil
+			return
 		}
 
 		select {
 		case <-c.cl.exitCh:
-			return nil
+			return
 		default:
-			handleCtx, err := c.handleRecords(ctx, records, handler)
-			if err != nil {
-				c.ackRecords(handleCtx, records, kgo.AckRelease)
-				return nil
-			}
-
-			c.ackRecords(handleCtx, records, kgo.AckAccept)
 		}
 
-		return nil
+		handleCtx, err := c.handleRecords(ctx, records, handler)
+
+		status := kgo.AckAccept
+		if err != nil {
+			status = kgo.AckRelease
+		}
+
+		c.ackRecords(handleCtx, records, status)
 	}
 }
 
