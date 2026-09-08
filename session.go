@@ -46,16 +46,6 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	return g, nil
 }
 
-func (g *GroupTransactSession) bindHandler() error {
-	if g.cl.sessionHandler == nil {
-		return errors.New("kafka: group transact session requires batch handler")
-	}
-
-	g.cl.handleFetches = g.handleFetchesBatch(g.cl.sessionHandler)
-
-	return nil
-}
-
 // Name returns the logical session name configured with WithName.
 func (g *GroupTransactSession) Name() string {
 	if g == nil || g.cl == nil {
@@ -94,7 +84,7 @@ func (g *GroupTransactSession) ConsumerGroup() string {
 
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	if err := g.cl.Client().Ping(ctx); err != nil {
-		return fmt.Errorf("kafka: ping client: %w", err)
+		return fmt.Errorf("kafka: ping group transact session: %w", err)
 	}
 
 	return nil
@@ -145,6 +135,16 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 	}
 
 	return g.cl.shutdownErr
+}
+
+func (g *GroupTransactSession) bindHandler() error {
+	if g.cl.sessionHandler == nil {
+		return errors.New("kafka: group transact session requires batch handler")
+	}
+
+	g.cl.handleFetches = g.handleFetchesBatch(g.cl.sessionHandler)
+
+	return nil
 }
 
 func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) handleFetchesFunc {

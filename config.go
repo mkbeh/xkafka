@@ -70,6 +70,8 @@ func WithLabels(labels map[string]string) Opt {
 // A hook may implement any number of the hook interfaces defined by this
 // package. Hooks are called in registration order.
 func WithHooks(hooks ...Hook) Opt {
+	hooks = append([]Hook(nil), hooks...)
+
 	return clientOpt{fn: func(c *client) {
 		c.hooks = append(c.hooks, hooks...)
 	}}

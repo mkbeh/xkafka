@@ -171,7 +171,8 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		}
 	}()
 
-	if err = fn(ctx, &Tx{cl: c.cl}); err != nil {
+	tx := &Tx{cl: c.cl}
+	if err = fn(ctx, tx); err != nil {
 		return err
 	}
 
@@ -419,23 +420,13 @@ func (c *Client) ackRecords(ctx context.Context, records []*kgo.Record, status k
 }
 
 func (c *Client) flushAcks(ctx context.Context) {
-	conn := c.cl.Client()
+	startTime := time.Now()
+	err := c.cl.Client().FlushAcks(ctx)
 
-	for {
-		startTime := time.Now()
-		err := conn.FlushAcks(ctx)
+	c.cl.hooks.onShareAckFlush(ctx, time.Since(startTime), err)
 
-		c.cl.hooks.onShareAckFlush(ctx, time.Since(startTime), err)
-
-		if err == nil {
-			return
-		}
-
+	if err != nil {
 		c.cl.log(kgo.LogLevelError, "error flushing share group acks", logKeyError, err)
-
-		if !c.cl.wait(ctx, c.cl.suspendCommittingTimeout) {
-			return
-		}
 	}
 }
 
