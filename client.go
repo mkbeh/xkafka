@@ -28,7 +28,7 @@ func NewClient(opts ...Opt) (*Client, error) {
 	}
 
 	cl.conn = conn
-	cl.applyKafkaOptions(conn)
+	cl.parseKafkaOptions(conn)
 
 	c := &Client{
 		cl: cl,

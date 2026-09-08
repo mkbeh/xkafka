@@ -30,7 +30,7 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	}
 
 	cl.conn = conn
-	cl.applyKafkaOptions(conn.Client())
+	cl.parseKafkaOptions(conn.Client())
 
 	g := &GroupTransactSession{
 		cl: cl,

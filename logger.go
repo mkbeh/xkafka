@@ -5,6 +5,7 @@ import "github.com/twmb/franz-go/pkg/kgo"
 const (
 	logKeyError         = "error"
 	logKeyTopic         = "topic"
+	logKeyPartition     = "partition"
 	logKeyRecord        = "record"
 	logKeyRecordCount   = "record_count"
 	logKeyConsumerGroup = "consumer_group"

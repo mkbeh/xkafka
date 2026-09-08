@@ -13,29 +13,31 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
-type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
-
-// conn is the minimal Kafka client interface shared by Client and GroupTransactSession.
-type conn interface {
-	PollRecords(ctx context.Context, maxPollRecords int) kgo.Fetches
-	AllowRebalance()
+// clientConn is the minimal Kafka client interface shared by Client and GroupTransactSession.
+type clientConn interface {
 	Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	ProduceSync(ctx context.Context, records ...*kgo.Record) kgo.ProduceResults
+
+	PollRecords(ctx context.Context, maxPollRecords int) kgo.Fetches
+	AllowRebalance()
 }
 
 var (
-	_ conn = (*kgo.Client)(nil)
-	_ conn = (*kgo.GroupTransactSession)(nil)
+	_ clientConn = (*kgo.Client)(nil)
+	_ clientConn = (*kgo.GroupTransactSession)(nil)
 )
+
+// handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
+type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
 
 // client contains the shared runtime state used by Client and GroupTransactSession.
 type client struct {
-	conn conn
+	conn      clientConn
+	kafkaOpts []kgo.Opt
 
-	fmt    *kgo.RecordFormatter
-	logger kgo.Logger
+	formatter *kgo.RecordFormatter
+	logger    kgo.Logger
 
 	name   string
 	labels map[string]string
@@ -48,12 +50,13 @@ type client struct {
 	batchHandler   BatchHandlerFunc
 	sessionHandler BatchTxHandlerFunc
 
-	consumerGroup   string
-	shareGroup      string
+	consumerGroup  string
+	shareGroup     string
+	maxPollRecords int
+
 	manualCommit    bool
 	autoCommitMarks bool
 	blockRebalance  bool
-	maxPollRecords  int
 
 	pollInterval             time.Duration
 	suspendProcessingTimeout time.Duration
@@ -61,8 +64,6 @@ type client struct {
 
 	shareRejectAfterDeliveries int32
 	shareReleaseTimeout        time.Duration
-
-	kafkaOpts []kgo.Opt
 
 	polling      atomic.Bool
 	shutdownOnce sync.Once
@@ -72,25 +73,23 @@ type client struct {
 
 func newClient(opts ...Opt) (*client, error) {
 	c := &client{
-		maxPollRecords: 100,
-
+		maxPollRecords:           100,
 		pollInterval:             time.Second,
-		suspendProcessingTimeout: time.Second * 30,
-		suspendCommittingTimeout: time.Second * 10,
-
-		labels: make(map[string]string),
-		exitCh: make(chan struct{}),
+		suspendProcessingTimeout: 30 * time.Second,
+		suspendCommittingTimeout: 10 * time.Second,
+		labels:                   make(map[string]string),
+		exitCh:                   make(chan struct{}),
 	}
 
 	for _, opt := range opts {
 		opt.apply(c)
 	}
 
-	processedHooks, err := processHooks(c.hooks)
+	hooks, err := processHooks(c.hooks)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kafka: process hooks: %w", err)
 	}
-	c.hooks = processedHooks
+	c.hooks = hooks
 
 	c.applyName()
 
@@ -98,7 +97,8 @@ func newClient(opts ...Opt) (*client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kafka: create record formatter: %w", err)
 	}
-	c.fmt = formatter
+	c.formatter = formatter
+
 	c.initDefaultPromise()
 
 	if c.logger != nil {
@@ -127,15 +127,31 @@ func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise Pro
 }
 
 func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
+	var first kgo.ProduceResult
+
 	results := c.conn.ProduceSync(ctx, records...)
-	for _, r := range results {
-		if r.Err != nil {
-			c.hooks.onProduceError(r.Record, r.Err)
-			c.log(kgo.LogLevelError, "error produce message sync", logKeyError, r.Err)
+	for _, result := range results {
+		if result.Err == nil {
+			continue
+		}
+
+		c.hooks.onProduceError(result.Record, result.Err)
+
+		if first.Err == nil {
+			first = result
 		}
 	}
 
-	return results.FirstErr()
+	if first.Err == nil {
+		return nil
+	}
+
+	c.log(kgo.LogLevelError, "error producing records",
+		logKeyError, first.Err,
+		logKeyRecord, c.formatRecord(first.Record),
+	)
+
+	return fmt.Errorf("kafka: produce records: %w", first.Err)
 }
 
 func (c *client) HandleFetches(ctx context.Context) error {
@@ -147,13 +163,13 @@ func (c *client) HandleFetches(ctx context.Context) error {
 		return errors.New("kafka: fetches handler is nil")
 	}
 
-	if c.polling.Swap(true) {
+	if !c.polling.CompareAndSwap(false, true) {
 		return errors.New("kafka: fetch loop already running")
 	}
 	defer c.polling.Store(false)
 
-	pollTicker := time.NewTicker(c.pollInterval)
-	defer pollTicker.Stop()
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -161,130 +177,17 @@ func (c *client) HandleFetches(ctx context.Context) error {
 			return ctx.Err()
 		case <-c.exitCh:
 			return nil
-		case <-pollTicker.C:
+		case <-ticker.C:
 		}
 
 		fetches := c.conn.PollRecords(ctx, c.maxPollRecords)
 		if fetches.IsClientClosed() {
-			c.log(kgo.LogLevelDebug, "kafka client closed for topic(s)", logKeyConsumerGroup, c.consumerGroup)
 			return nil
 		}
 
 		if err := c.processFetches(ctx, fetches); err != nil {
 			return err
 		}
-	}
-}
-
-func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error {
-	if c.blockRebalance {
-		defer c.conn.AllowRebalance()
-	}
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	if err := c.handleFetchErrors(ctx, fetches); err != nil {
-		return err
-	}
-
-	c.handleFetches(ctx, fetches)
-
-	return nil
-}
-
-func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) error {
-	var firstErr error
-	var firstTopic string
-	var firstPartition int32
-
-	fetches.EachError(func(topic string, partition int32, err error) {
-		recoverable := isRecoverableFetchError(err)
-		c.hooks.onFetchError(ctx, topic, partition, recoverable, err)
-
-		if recoverable {
-			c.log(kgo.LogLevelWarn, "recoverable error fetching records",
-				logKeyError, err,
-				logKeyTopic, topic,
-			)
-			return
-		}
-
-		c.log(kgo.LogLevelError, "error fetching records",
-			logKeyError, err,
-			logKeyTopic, topic,
-		)
-
-		if firstErr == nil {
-			firstErr = err
-			firstTopic = topic
-			firstPartition = partition
-		}
-	})
-
-	if firstErr == nil {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"kafka: fetch topic %q partition %d: %w",
-		firstTopic,
-		firstPartition,
-		firstErr,
-	)
-}
-
-func isRecoverableFetchError(err error) bool {
-	if kerr.IsRetriable(err) {
-		return true
-	}
-
-	if _, ok := errors.AsType[*kgo.ErrDataLoss](err); ok {
-		return true
-	}
-
-	if _, ok := errors.AsType[*kgo.ErrGroupSession](err); ok {
-		return true
-	}
-
-	return false
-}
-
-func (c *client) wait(ctx context.Context, delay time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-c.exitCh:
-		return false
-	default:
-	}
-
-	if delay <= 0 {
-		return true
-	}
-
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return false
-	case <-c.exitCh:
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-func (c *client) applyKafkaOptions(conn *kgo.Client) {
-	c.consumerGroup, _ = conn.OptValue(kgo.ConsumerGroup).(string)
-	c.shareGroup, _ = conn.OptValue(kgo.ShareGroup).(string)
-
-	if c.consumerGroup != "" {
-		c.manualCommit, _ = conn.OptValue(kgo.DisableAutoCommit).(bool)
-		c.autoCommitMarks, _ = conn.OptValue(kgo.AutoCommitMarks).(bool)
-		c.blockRebalance, _ = conn.OptValue(kgo.BlockRebalanceOnPoll).(bool)
 	}
 }
 
@@ -333,6 +236,86 @@ func (c *client) Labels() map[string]string {
 	return maps.Clone(c.labels)
 }
 
+// processFetches processes a single PollRecords result.
+// The separate scope ensures AllowRebalance is deferred per poll when BlockRebalanceOnPoll is enabled.
+func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error {
+	if c.blockRebalance {
+		defer c.conn.AllowRebalance()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if err := c.handleFetchErrors(ctx, fetches); err != nil {
+		return err
+	}
+
+	c.handleFetches(ctx, fetches)
+
+	return nil
+}
+
+func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) error {
+	var fatal kgo.FetchError
+	var recoverable kgo.FetchError
+
+	fetches.EachError(func(topic string, partition int32, err error) {
+		isRecoverable := isRecoverableFetchError(err)
+		c.hooks.onFetchError(ctx, topic, partition, isRecoverable, err)
+
+		if isRecoverable {
+			if recoverable.Err == nil {
+				recoverable = kgo.FetchError{
+					Topic:     topic,
+					Partition: partition,
+					Err:       err,
+				}
+			}
+			return
+		}
+
+		if fatal.Err == nil {
+			fatal = kgo.FetchError{
+				Topic:     topic,
+				Partition: partition,
+				Err:       err,
+			}
+		}
+	})
+
+	if fatal.Err != nil {
+		c.log(kgo.LogLevelError, "error fetching records",
+			logKeyError, fatal.Err,
+			logKeyTopic, fatal.Topic,
+			logKeyPartition, fatal.Partition,
+		)
+
+		return fmt.Errorf("kafka: fetch topic %q partition %d: %w", fatal.Topic, fatal.Partition, fatal.Err)
+	}
+
+	if recoverable.Err != nil {
+		c.log(kgo.LogLevelWarn, "recoverable error fetching records",
+			logKeyError, recoverable.Err,
+			logKeyTopic, recoverable.Topic,
+			logKeyPartition, recoverable.Partition,
+		)
+	}
+
+	return nil
+}
+
+func (c *client) parseKafkaOptions(conn *kgo.Client) {
+	c.consumerGroup, _ = conn.OptValue(kgo.ConsumerGroup).(string)
+	c.shareGroup, _ = conn.OptValue(kgo.ShareGroup).(string)
+
+	if c.consumerGroup != "" {
+		c.manualCommit, _ = conn.OptValue(kgo.DisableAutoCommit).(bool)
+		c.autoCommitMarks, _ = conn.OptValue(kgo.AutoCommitMarks).(bool)
+		c.blockRebalance, _ = conn.OptValue(kgo.BlockRebalanceOnPoll).(bool)
+	}
+}
+
 func (c *client) applyName() {
 	if c.name == "" {
 		return
@@ -343,7 +326,7 @@ func (c *client) applyName() {
 
 func (c *client) initDefaultPromise() {
 	c.defaultPromise = func(record *kgo.Record, err error) {
-		c.loggingPromise(record, err)
+		c.produceErrorPromise(record, err)
 
 		if c.promiseFunc != nil {
 			c.promiseFunc(record, err)
@@ -353,23 +336,67 @@ func (c *client) initDefaultPromise() {
 
 func (c *client) wrapPromise(promise PromiseFunc) PromiseFunc {
 	return func(record *kgo.Record, err error) {
-		c.loggingPromise(record, err)
+		c.produceErrorPromise(record, err)
 		promise(record, err)
 	}
 }
 
-func (c *client) loggingPromise(record *kgo.Record, err error) {
-	if err != nil {
-		c.hooks.onProduceError(record, err)
-		c.log(kgo.LogLevelError, "kafka async producer error",
-			logKeyError, err,
-			logKeyRecord, c.formatRecord(record),
-		)
+func (c *client) produceErrorPromise(record *kgo.Record, err error) {
+	if err == nil {
+		return
 	}
+
+	c.hooks.onProduceError(record, err)
+	c.log(kgo.LogLevelError, "error producing record",
+		logKeyError, err,
+		logKeyRecord, c.formatRecord(record),
+	)
 }
 
 func (c *client) formatRecord(record *kgo.Record) string {
-	return string(c.fmt.AppendRecord(nil, record))
+	return string(c.formatter.AppendRecord(nil, record))
+}
+
+func (c *client) wait(ctx context.Context, delay time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.exitCh:
+		return false
+	default:
+	}
+
+	if delay <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.exitCh:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func isRecoverableFetchError(err error) bool {
+	if kerr.IsRetriable(err) {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrDataLoss](err); ok {
+		return true
+	}
+
+	if _, ok := errors.AsType[*kgo.ErrGroupSession](err); ok {
+		return true
+	}
+
+	return false
 }
 
 func newFormatter() (*kgo.RecordFormatter, error) {

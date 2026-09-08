@@ -339,7 +339,7 @@ func TestNewClientValidatesHooks(t *testing.T) {
 		t.Fatal("expected hook validation error")
 	}
 
-	const want = "found an argument that implements no hook interfaces"
+	const want = "kafka: process hooks: found an argument that implements no hook interfaces"
 	if err.Error() != want {
 		t.Fatalf("error = %q, want %q", err, want)
 	}
