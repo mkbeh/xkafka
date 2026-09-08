@@ -146,10 +146,12 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 		return nil
 	}
 
-	c.log(kgo.LogLevelError, "error producing records",
-		logKeyError, first.Err,
-		logKeyRecord, c.formatRecord(first.Record),
-	)
+	if c.logEnabled(kgo.LogLevelError) {
+		c.log(kgo.LogLevelError, "error producing records",
+			logKeyError, first.Err,
+			logKeyRecord, c.formatRecord(first.Record),
+		)
+	}
 
 	return fmt.Errorf("kafka: produce records: %w", first.Err)
 }
@@ -347,10 +349,13 @@ func (c *client) produceErrorPromise(record *kgo.Record, err error) {
 	}
 
 	c.hooks.onProduceError(record, err)
-	c.log(kgo.LogLevelError, "error producing record",
-		logKeyError, err,
-		logKeyRecord, c.formatRecord(record),
-	)
+
+	if c.logEnabled(kgo.LogLevelError) {
+		c.logger.Log(kgo.LogLevelError, "error producing record",
+			logKeyError, err,
+			logKeyRecord, c.formatRecord(record),
+		)
+	}
 }
 
 func (c *client) formatRecord(record *kgo.Record) string {

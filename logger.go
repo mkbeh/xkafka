@@ -11,8 +11,12 @@ const (
 	logKeyConsumerGroup = "consumer_group"
 )
 
+func (c *client) logEnabled(level kgo.LogLevel) bool {
+	return c.logger != nil && c.logger.Level() >= level
+}
+
 func (c *client) log(level kgo.LogLevel, msg string, keyvals ...any) {
-	if c.logger == nil || c.logger.Level() < level {
+	if !c.logEnabled(level) {
 		return
 	}
 
