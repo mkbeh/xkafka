@@ -140,6 +140,18 @@ func WithMaxPollRecords(maxPollRecords int) Opt {
 	}}
 }
 
+// WithMaxRetries sets the maximum number of retries after a regular batch handler error.
+//
+// A value of zero disables retries. By default, retries are unlimited.
+// This option does not apply to Share Groups or GroupTransactSession handlers.
+func WithMaxRetries(maxRetries int) Opt {
+	return clientOpt{fn: func(c *client) {
+		if maxRetries >= 0 {
+			c.maxHandlerRetries = maxRetries
+		}
+	}}
+}
+
 // WithPollInterval sets the interval between consumer poll iterations.
 func WithPollInterval(interval time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {

@@ -302,9 +302,13 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			return nil
 		}
 
-		for {
+		for retries := 0; ; retries++ {
 			handleCtx, err := c.handleRecords(ctx, records, handler)
 			if err != nil {
+				if c.cl.maxHandlerRetries >= 0 && retries >= c.cl.maxHandlerRetries {
+					return fmt.Errorf("kafka: batch handler retries exhausted: %w", err)
+				}
+
 				if !c.cl.wait(ctx, c.cl.suspendProcessingTimeout) {
 					return nil
 				}

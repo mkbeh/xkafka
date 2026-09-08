@@ -50,9 +50,10 @@ type client struct {
 	batchHandler   BatchHandlerFunc
 	sessionHandler BatchTxHandlerFunc
 
-	consumerGroup  string
-	shareGroup     string
-	maxPollRecords int
+	consumerGroup     string
+	shareGroup        string
+	maxPollRecords    int
+	maxHandlerRetries int
 
 	manualCommit    bool
 	autoCommitMarks bool
@@ -74,6 +75,7 @@ type client struct {
 func newClient(opts ...Opt) (*client, error) {
 	c := &client{
 		maxPollRecords:           100,
+		maxHandlerRetries:        -1,
 		pollInterval:             time.Second,
 		suspendProcessingTimeout: 30 * time.Second,
 		suspendCommittingTimeout: 10 * time.Second,
