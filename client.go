@@ -292,21 +292,21 @@ func (c *Client) abortTransaction(ctx context.Context) error {
 }
 
 func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
 
 		if !c.cl.wait(ctx, 0) {
-			return
+			return nil
 		}
 
 		for {
 			handleCtx, err := c.handleRecords(ctx, records, handler)
 			if err != nil {
 				if !c.cl.wait(ctx, c.cl.suspendProcessingTimeout) {
-					return
+					return nil
 				}
 
 				continue
@@ -319,7 +319,7 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 				c.cl.Client().MarkCommitRecords(records...)
 			}
 
-			return
+			return nil
 		}
 	}
 }
@@ -346,14 +346,14 @@ func (c *Client) commitOffsets(ctx context.Context) {
 }
 
 func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
 
 		if !c.cl.wait(ctx, 0) {
-			return
+			return nil
 		}
 
 		handleCtx, err := c.handleRecords(ctx, records, handler)
@@ -364,6 +364,8 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 		}
 
 		c.ackRecords(handleCtx, records, status)
+
+		return nil
 	}
 }
 

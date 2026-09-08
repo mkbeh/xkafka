@@ -29,7 +29,7 @@ var (
 )
 
 // handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
-type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches)
+type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches) error
 
 // client contains the shared runtime state used by Client and GroupTransactSession.
 type client struct {
@@ -253,9 +253,7 @@ func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error 
 		return err
 	}
 
-	c.handleFetches(ctx, fetches)
-
-	return nil
+	return c.handleFetches(ctx, fetches)
 }
 
 func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) error {

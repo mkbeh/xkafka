@@ -148,14 +148,14 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 }
 
 func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) handleFetchesFunc {
-	return func(ctx context.Context, fetches kgo.Fetches) {
+	return func(ctx context.Context, fetches kgo.Fetches) error {
 		records := fetches.Records()
 		if len(records) == 0 {
-			return
+			return nil
 		}
 
 		if !g.cl.wait(ctx, 0) {
-			return
+			return nil
 		}
 
 		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
@@ -169,8 +169,14 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				)
 			}
 
+			// Begin and End errors indicate transaction-level failures.
+			// Stop the fetch loop rather than starting another transaction on the same session.
+			if txErr != nil {
+				return err
+			}
+
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
-			return
+			return nil
 		}
 
 		if !committed {
@@ -178,6 +184,8 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				logKeyConsumerGroup, g.cl.consumerGroup,
 			)
 		}
+
+		return nil
 	}
 }
 
