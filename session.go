@@ -93,12 +93,8 @@ func (g *GroupTransactSession) ConsumerGroup() string {
 }
 
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
-	if g == nil || g.cl == nil || g.cl.conn == nil {
-		return fmt.Errorf("kafka: group transact session is nil")
-	}
-
 	if err := g.cl.Client().Ping(ctx); err != nil {
-		return fmt.Errorf("kafka: ping group transact session: %w", err)
+		return fmt.Errorf("kafka: ping client: %w", err)
 	}
 
 	return nil
@@ -122,19 +118,14 @@ func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
 
 // Shutdown stops polling and closes the group transaction session.
 func (g *GroupTransactSession) Shutdown(_ context.Context) error {
-	if g.cl == nil {
+	if g == nil || g.cl == nil {
 		return nil
 	}
 
-	didShutdown := false
-	defer func() {
-		if didShutdown {
-			g.cl.hooks.onGroupTransactSessionClosed(g)
-		}
-	}()
+	closed := false
 
 	g.cl.shutdownOnce.Do(func() {
-		didShutdown = true
+		closed = true
 		close(g.cl.exitCh)
 
 		if g.cl.conn == nil {
@@ -149,6 +140,10 @@ func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 		}
 	})
 
+	if closed {
+		g.cl.hooks.onGroupTransactSessionClosed(g)
+	}
+
 	return g.cl.shutdownErr
 }
 
@@ -159,25 +154,20 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 			return
 		}
 
-		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
-
-		if txErr != nil {
-			g.cl.log(kgo.LogLevelError, "error handling group transaction",
-				logKeyError, txErr,
-				logKeyRecord, g.cl.formatRecord(records[0]),
-				logKeyRecordCount, len(records),
-			)
-
-			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
+		if !g.cl.wait(ctx, 0) {
 			return
 		}
 
-		if handleErr != nil {
-			g.cl.log(kgo.LogLevelError, "error handling records in group transaction",
-				logKeyError, handleErr,
-				logKeyRecord, g.cl.formatRecord(records[0]),
-				logKeyRecordCount, len(records),
-			)
+		committed, handleErr, txErr := g.handleRecordsInTx(ctx, records, handler)
+
+		if err := errors.Join(txErr, handleErr); err != nil {
+			if g.cl.logEnabled(kgo.LogLevelError) {
+				g.cl.log(kgo.LogLevelError, "error handling group transaction",
+					logKeyError, err,
+					logKeyRecord, g.cl.formatRecord(records[0]),
+					logKeyRecordCount, len(records),
+				)
+			}
 
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
 			return
@@ -197,8 +187,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	handler BatchTxHandlerFunc,
 ) (committed bool, handleErr, txErr error) {
 	ctx = g.cl.hooks.onTransactionStart(ctx, TransactionTypeGroup)
-	conn := g.cl.Session()
-	transactionStart := time.Now()
+	startTime := time.Now()
 
 	defer func() {
 		outcome := TransactionOutcomeAbort
@@ -218,17 +207,19 @@ func (g *GroupTransactSession) handleRecordsInTx(
 			ctx,
 			TransactionTypeGroup,
 			outcome,
-			time.Since(transactionStart),
+			time.Since(startTime),
 			hookErr,
 		)
 	}()
 
+	conn := g.cl.Session()
+
 	if err := conn.Begin(); err != nil {
-		return false, nil, fmt.Errorf("kafka: begin group transaction: %w", err)
+		txErr = fmt.Errorf("kafka: begin group transaction: %w", err)
+		return
 	}
 
 	tx := &Tx{cl: g.cl}
-
 	handleErr = g.handleRecords(ctx, records, tx, handler)
 
 	endTry := kgo.TryCommit
@@ -236,12 +227,12 @@ func (g *GroupTransactSession) handleRecordsInTx(
 		endTry = kgo.TryAbort
 	}
 
-	committed, err := conn.End(ctx, endTry)
-	if err != nil {
-		return false, handleErr, fmt.Errorf("kafka: end group transaction: %w", err)
+	committed, txErr = conn.End(ctx, endTry)
+	if txErr != nil {
+		txErr = fmt.Errorf("kafka: end group transaction: %w", txErr)
 	}
 
-	return committed, handleErr, nil
+	return
 }
 
 func (g *GroupTransactSession) handleRecords(

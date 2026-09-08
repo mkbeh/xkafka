@@ -448,7 +448,7 @@ func (c *Client) handleRecords(
 
 		c.cl.hooks.onHandleEnd(handleCtx, records, time.Since(startTime), handleErr)
 
-		if handleErr != nil {
+		if handleErr != nil && c.cl.logEnabled(kgo.LogLevelError) {
 			c.cl.log(
 				kgo.LogLevelError,
 				"error handling records",
