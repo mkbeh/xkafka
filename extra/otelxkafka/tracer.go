@@ -157,13 +157,13 @@ func (t *Tracer) OnOffsetCommit(ctx context.Context, duration time.Duration, err
 
 func (t *Tracer) OnHandleStart(ctx context.Context, records []*kgo.Record) context.Context {
 	attrs := t.consumerAttributes(
-		attribute.String(messagingSystemAttribute, messagingSystemKafka),
-		attribute.String(operationNameAttribute, handleOperationName),
-		attribute.String(operationTypeAttribute, processOperationType),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationName(processOperationName),
+		semconv.MessagingOperationTypeProcess,
 		semconv.MessagingBatchMessageCount(len(records)),
 	)
 
-	spanName := handleOperationName
+	spanName := processOperationName
 	topic, partition, sameTopic, samePartition := commonRecordDestination(records)
 	if sameTopic && topic != "" {
 		spanName += " " + topic
@@ -215,8 +215,8 @@ func (t *Tracer) OnTransactionStart(
 	attrs := t.transactionAttributes(transactionType)
 	attrs = append(
 		attrs,
-		attribute.String(messagingSystemAttribute, messagingSystemKafka),
-		attribute.String(transactionTypeAttribute, string(transactionType)),
+		semconv.MessagingSystemKafka,
+		transactionTypeKey.String(string(transactionType)),
 	)
 
 	ctx, span := t.tracer.Start(
@@ -242,7 +242,7 @@ func (t *Tracer) OnTransactionEnd(
 	}
 
 	span.SetAttributes(
-		attribute.String(transactionOutcomeAttribute, string(outcome)),
+		transactionOutcomeKey.String(string(outcome)),
 	)
 	endSpan(span, err)
 }
@@ -259,9 +259,9 @@ func (t *Tracer) endSettlementSpan(
 	startTime := endTime.Add(-duration)
 
 	attrs := t.consumerAttributes(
-		attribute.String(messagingSystemAttribute, messagingSystemKafka),
-		attribute.String(operationNameAttribute, operationName),
-		attribute.String(operationTypeAttribute, settleOperationType),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationName(operationName),
+		semconv.MessagingOperationTypeSettle,
 	)
 
 	_, span := t.tracer.Start(
@@ -320,7 +320,7 @@ func (t *Tracer) consumerAttributes(extra ...attribute.KeyValue) []attribute.Key
 	case t.consumerGroup != "":
 		attrs = append(attrs, semconv.MessagingConsumerGroupName(t.consumerGroup))
 	case t.shareGroup != "":
-		attrs = append(attrs, attribute.String(shareGroupAttribute, t.shareGroup))
+		attrs = append(attrs, shareGroupKey.String(t.shareGroup))
 	}
 
 	return attrs
@@ -374,7 +374,7 @@ func recordLinkAttributes(record *kgo.Record) []attribute.KeyValue {
 		)
 	}
 	if record.Offset >= 0 {
-		attrs = append(attrs, attribute.Int64(kafkaOffsetAttribute, record.Offset))
+		attrs = append(attrs, semconv.MessagingKafkaOffsetKey.Int64(record.Offset))
 	}
 
 	return attrs

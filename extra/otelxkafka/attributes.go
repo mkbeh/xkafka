@@ -9,31 +9,15 @@ import (
 )
 
 const (
-	clientIDAttribute               = "messaging.client.id"
-	consumerGroupAttribute          = "messaging.consumer.group.name"
-	destinationNameAttribute        = "messaging.destination.name"
-	destinationPartitionIDAttribute = "messaging.destination.partition.id"
-	operationNameAttribute          = "messaging.operation.name"
-	operationTypeAttribute          = "messaging.operation.type"
-	messagingSystemAttribute        = "messaging.system"
-	errorTypeAttribute              = "error.type"
-	recordCountAttribute            = "messaging.batch.message_count"
-	kafkaOffsetAttribute            = "messaging.kafka.offset"
+	fetchErrorRecoverableKey attribute.Key = "xkafka.fetch.error.recoverable"
+	shareGroupKey            attribute.Key = "xkafka.share.group.name"
+	shareAckOutcomeKey       attribute.Key = "xkafka.share.ack.outcome"
+	transactionOutcomeKey    attribute.Key = "xkafka.transaction.outcome"
+	transactionTypeKey       attribute.Key = "xkafka.transaction.type"
 
-	fetchErrorRecoverableAttribute = "xkafka.fetch.error.recoverable"
-	shareGroupAttribute            = "xkafka.share.group.name"
-	shareAckOutcomeAttribute       = "xkafka.share.ack.outcome"
-	transactionOutcomeAttribute    = "xkafka.transaction.outcome"
-	transactionTypeAttribute       = "xkafka.transaction.type"
-
-	messagingSystemKafka = "kafka"
-
-	handleOperationName       = "handle"
+	processOperationName      = "process"
 	offsetCommitOperationName = "commit"
 	shareAckOperationName     = "ack"
-
-	processOperationType = "process"
-	settleOperationType  = "settle"
 )
 
 func newClientAttributes(name string, labels map[string]string) attribute.Set {
@@ -57,7 +41,7 @@ func newClientAttributes(name string, labels map[string]string) attribute.Set {
 func errorType(err error) attribute.KeyValue {
 	var kafkaErr *kerr.Error
 	if errors.As(err, &kafkaErr) && kafkaErr != nil && kafkaErr.Message != "" {
-		return attribute.String(errorTypeAttribute, kafkaErr.Message)
+		return semconv.ErrorTypeKey.String(kafkaErr.Message)
 	}
 
 	return semconv.ErrorType(err)
@@ -65,21 +49,21 @@ func errorType(err error) attribute.KeyValue {
 
 func isReservedAttribute(key string) bool {
 	switch key {
-	case clientIDAttribute,
-		consumerGroupAttribute,
-		destinationNameAttribute,
-		destinationPartitionIDAttribute,
-		operationNameAttribute,
-		operationTypeAttribute,
-		messagingSystemAttribute,
-		errorTypeAttribute,
-		recordCountAttribute,
-		kafkaOffsetAttribute,
-		fetchErrorRecoverableAttribute,
-		shareGroupAttribute,
-		shareAckOutcomeAttribute,
-		transactionOutcomeAttribute,
-		transactionTypeAttribute:
+	case string(semconv.MessagingClientIDKey),
+		string(semconv.MessagingConsumerGroupNameKey),
+		string(semconv.MessagingDestinationNameKey),
+		string(semconv.MessagingDestinationPartitionIDKey),
+		string(semconv.MessagingOperationNameKey),
+		string(semconv.MessagingOperationTypeKey),
+		string(semconv.MessagingSystemKey),
+		string(semconv.ErrorTypeKey),
+		string(semconv.MessagingBatchMessageCountKey),
+		string(semconv.MessagingKafkaOffsetKey),
+		string(fetchErrorRecoverableKey),
+		string(shareGroupKey),
+		string(shareAckOutcomeKey),
+		string(transactionOutcomeKey),
+		string(transactionTypeKey):
 		return true
 	}
 

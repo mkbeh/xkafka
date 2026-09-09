@@ -59,13 +59,7 @@ type HookProduceError interface {
 
 // HookFetchError is called when fetching records fails.
 type HookFetchError interface {
-	OnFetchError(
-		ctx context.Context,
-		topic string,
-		partition int32,
-		recoverable bool,
-		err error,
-	)
+	OnFetchError(ctx context.Context, topic string, partition int32, recoverable bool, err error)
 }
 
 // HookOffsetCommit is called after a consumer offset commit attempt ends.
@@ -82,12 +76,7 @@ type HookHandleStart interface {
 
 // HookHandleEnd is called after the configured handler returns.
 type HookHandleEnd interface {
-	OnHandleEnd(
-		ctx context.Context,
-		records []*kgo.Record,
-		duration time.Duration,
-		err error,
-	)
+	OnHandleEnd(ctx context.Context, records []*kgo.Record, duration time.Duration, err error)
 }
 
 // ShareAckOutcome describes the outcome of a Share Group acknowledgement.
@@ -102,11 +91,7 @@ const (
 // HookShareAck is called when acknowledgement outcomes are assigned to
 // Share Group records.
 type HookShareAck interface {
-	OnShareAck(
-		ctx context.Context,
-		outcome ShareAckOutcome,
-		recordCount int,
-	)
+	OnShareAck(ctx context.Context, outcome ShareAckOutcome, recordCount int)
 }
 
 // HookShareAckFlush is called after a Share Group acknowledgement flush attempt ends.
@@ -136,21 +121,12 @@ const (
 // The returned context is passed to subsequent transaction hooks and transaction
 // processing.
 type HookTransactionStart interface {
-	OnTransactionStart(
-		ctx context.Context,
-		transactionType TransactionType,
-	) context.Context
+	OnTransactionStart(ctx context.Context, transactionType TransactionType) context.Context
 }
 
 // HookTransactionEnd is called when a transaction attempt ends.
 type HookTransactionEnd interface {
-	OnTransactionEnd(
-		ctx context.Context,
-		transactionType TransactionType,
-		outcome TransactionOutcome,
-		duration time.Duration,
-		err error,
-	)
+	OnTransactionEnd(ctx context.Context, transactionType TransactionType, outcome TransactionOutcome, duration time.Duration, err error)
 }
 
 func (hs hooks) onNewClient(client *Client) {
@@ -193,13 +169,7 @@ func (hs hooks) onProduceError(record *kgo.Record, err error) {
 	})
 }
 
-func (hs hooks) onFetchError(
-	ctx context.Context,
-	topic string,
-	partition int32,
-	recoverable bool,
-	err error,
-) {
+func (hs hooks) onFetchError(ctx context.Context, topic string, partition int32, recoverable bool, err error) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookFetchError); ok {
 			h.OnFetchError(ctx, topic, partition, recoverable, err)
@@ -225,12 +195,7 @@ func (hs hooks) onHandleStart(ctx context.Context, records []*kgo.Record) contex
 	return ctx
 }
 
-func (hs hooks) onHandleEnd(
-	ctx context.Context,
-	records []*kgo.Record,
-	duration time.Duration,
-	err error,
-) {
+func (hs hooks) onHandleEnd(ctx context.Context, records []*kgo.Record, duration time.Duration, err error) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookHandleEnd); ok {
 			h.OnHandleEnd(ctx, records, duration, err)
@@ -238,11 +203,7 @@ func (hs hooks) onHandleEnd(
 	})
 }
 
-func (hs hooks) onShareAck(
-	ctx context.Context,
-	outcome ShareAckOutcome,
-	recordCount int,
-) {
+func (hs hooks) onShareAck(ctx context.Context, outcome ShareAckOutcome, recordCount int) {
 	if recordCount == 0 {
 		return
 	}
@@ -262,10 +223,7 @@ func (hs hooks) onShareAckFlush(ctx context.Context, duration time.Duration, err
 	})
 }
 
-func (hs hooks) onTransactionStart(
-	ctx context.Context,
-	transactionType TransactionType,
-) context.Context {
+func (hs hooks) onTransactionStart(ctx context.Context, transactionType TransactionType) context.Context {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookTransactionStart); ok {
 			ctx = h.OnTransactionStart(ctx, transactionType)
@@ -275,13 +233,7 @@ func (hs hooks) onTransactionStart(
 	return ctx
 }
 
-func (hs hooks) onTransactionEnd(
-	ctx context.Context,
-	transactionType TransactionType,
-	outcome TransactionOutcome,
-	duration time.Duration,
-	err error,
-) {
+func (hs hooks) onTransactionEnd(ctx context.Context, transactionType TransactionType, outcome TransactionOutcome, duration time.Duration, err error) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookTransactionEnd); ok {
 			h.OnTransactionEnd(ctx, transactionType, outcome, duration, err)

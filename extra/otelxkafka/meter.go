@@ -192,7 +192,7 @@ func (m *Meter) OnFetchError(
 	err error,
 ) {
 	attrs := m.consumerAttributes(
-		attribute.Bool(fetchErrorRecoverableAttribute, recoverable),
+		fetchErrorRecoverableKey.Bool(recoverable),
 	)
 	if topic != "" {
 		attrs = append(attrs, semconv.MessagingDestinationName(topic))
@@ -246,7 +246,7 @@ func (m *Meter) OnHandleEnd(
 		m.instruments.processDuration.Record(
 			ctx,
 			duration.Seconds(),
-			handleOperationName,
+			processOperationName,
 			messagingconv.SystemKafka,
 			attrs...,
 		)
@@ -276,7 +276,7 @@ func (m *Meter) OnShareAck(
 	recordCount int,
 ) {
 	attrs := m.consumerAttributes(
-		attribute.String(shareAckOutcomeAttribute, string(outcome)),
+		shareAckOutcomeKey.String(string(outcome)),
 	)
 
 	m.instruments.shareAckRecords.Add(
@@ -313,8 +313,8 @@ func (m *Meter) OnTransactionEnd(
 	attrs := m.transactionAttributes(transactionType)
 	attrs = append(
 		attrs,
-		attribute.String(transactionTypeAttribute, string(transactionType)),
-		attribute.String(transactionOutcomeAttribute, string(outcome)),
+		transactionTypeKey.String(string(transactionType)),
+		transactionOutcomeKey.String(string(outcome)),
 	)
 	if err != nil {
 		attrs = append(attrs, errorType(err))
@@ -432,7 +432,7 @@ func (m *Meter) consumerAttributes(extra ...attribute.KeyValue) []attribute.KeyV
 	case m.consumerGroup != "":
 		attrs = append(attrs, semconv.MessagingConsumerGroupName(m.consumerGroup))
 	case m.shareGroup != "":
-		attrs = append(attrs, attribute.String(shareGroupAttribute, m.shareGroup))
+		attrs = append(attrs, shareGroupKey.String(m.shareGroup))
 	}
 
 	return attrs
