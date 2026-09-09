@@ -384,7 +384,6 @@ func endSpan(span trace.Span, err error) {
 	if err != nil {
 		span.SetAttributes(errorType(err))
 		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
 	}
 
 	span.End()
@@ -394,7 +393,6 @@ func endSpanAt(span trace.Span, err error, endTime time.Time) {
 	if err != nil {
 		span.SetAttributes(errorType(err))
 		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err, trace.WithTimestamp(endTime))
 	}
 
 	span.End(trace.WithTimestamp(endTime))

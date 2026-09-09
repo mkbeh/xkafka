@@ -24,10 +24,6 @@ func newClientAttributes(name string, labels map[string]string) attribute.Set {
 	attributes := make([]attribute.KeyValue, 0, len(labels)+1)
 
 	for key, value := range labels {
-		if isReservedAttribute(key) {
-			continue
-		}
-
 		attributes = append(attributes, attribute.String(key, value))
 	}
 
@@ -45,27 +41,4 @@ func errorType(err error) attribute.KeyValue {
 	}
 
 	return semconv.ErrorType(err)
-}
-
-func isReservedAttribute(key string) bool {
-	switch key {
-	case string(semconv.MessagingClientIDKey),
-		string(semconv.MessagingConsumerGroupNameKey),
-		string(semconv.MessagingDestinationNameKey),
-		string(semconv.MessagingDestinationPartitionIDKey),
-		string(semconv.MessagingOperationNameKey),
-		string(semconv.MessagingOperationTypeKey),
-		string(semconv.MessagingSystemKey),
-		string(semconv.ErrorTypeKey),
-		string(semconv.MessagingBatchMessageCountKey),
-		string(semconv.MessagingKafkaOffsetKey),
-		string(fetchErrorRecoverableKey),
-		string(shareGroupKey),
-		string(shareAckOutcomeKey),
-		string(transactionOutcomeKey),
-		string(transactionTypeKey):
-		return true
-	}
-
-	return false
 }
