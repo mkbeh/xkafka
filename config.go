@@ -1,7 +1,6 @@
 package xkafka
 
 import (
-	"errors"
 	"strings"
 	"time"
 
@@ -49,30 +48,6 @@ func WithHooks(hooks ...Hook) Opt {
 	return clientOpt{fn: func(c *client) {
 		c.hooks = append(c.hooks, hooks...)
 	}}
-}
-
-// processHooks inspects and recursively unpacks slices of hooks, stopping if
-// the instance implements any hook interface. It returns an error on the first
-// instance that implements no hook interface.
-func processHooks(hooks []Hook) ([]Hook, error) {
-	var processedHooks []Hook
-
-	for _, hook := range hooks {
-		if implementsAnyHook(hook) {
-			processedHooks = append(processedHooks, hook)
-		} else if moreHooks, ok := hook.([]Hook); ok {
-			more, err := processHooks(moreHooks)
-			if err != nil {
-				return nil, err
-			}
-
-			processedHooks = append(processedHooks, more...)
-		} else {
-			return nil, errors.New("found an argument that implements no hook interfaces")
-		}
-	}
-
-	return processedHooks, nil
 }
 
 // WithLogger sets the logger used by xkafka and franz-go.

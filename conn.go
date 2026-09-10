@@ -84,12 +84,6 @@ func newClient(opts ...Opt) (*client, error) {
 		opt.apply(c)
 	}
 
-	hooks, err := processHooks(c.hooks)
-	if err != nil {
-		return nil, fmt.Errorf("kafka: process hooks: %w", err)
-	}
-	c.hooks = hooks
-
 	c.applyName()
 
 	formatter, err := newFormatter()

@@ -7,12 +7,6 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-///////////////////////////////////////////////////////////////
-// NOTE:                                                     //
-// NOTE: Make sure new hooks are checked in implementsAnyHook //
-// NOTE:                                                     //
-///////////////////////////////////////////////////////////////
-
 // Hook is a hook to be called when something happens in xkafka.
 //
 // The base Hook interface is meaningless, but wherever a hook can occur in
@@ -286,29 +280,4 @@ func (hs hooks) onTransactionEnd(ctx context.Context, transactionType Transactio
 			h.OnTransactionEnd(ctx, transactionType, outcome, duration, err)
 		}
 	})
-}
-
-// implementsAnyHook checks the incoming Hook for any Hook implementation.
-func implementsAnyHook(h Hook) bool {
-	switch h.(type) {
-	case HookNewClient,
-		HookClientClosed,
-		HookNewGroupTransactSession,
-		HookGroupTransactSessionClosed,
-		HookProduceStart,
-		HookProduceRecord,
-		HookProduceEnd,
-		HookProduceError,
-		HookFetchError,
-		HookOffsetCommit,
-		HookHandleStart,
-		HookHandleEnd,
-		HookShareAck,
-		HookShareAckFlush,
-		HookTransactionStart,
-		HookTransactionEnd:
-		return true
-	}
-
-	return false
 }
