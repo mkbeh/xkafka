@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/twmb/franz-go/pkg/kerr"
-	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
@@ -67,28 +66,7 @@ func normalizeAttributes(attrs ...attribute.KeyValue) []attribute.KeyValue {
 	return slices.Clip(set.ToSlice())
 }
 
-func commonRecordDestination(records []*kgo.Record) (topic string, partition int32) {
-	if len(records) == 0 || records[0] == nil {
-		return "", -1
-	}
-
-	topic = records[0].Topic
-	partition = records[0].Partition
-
-	for _, record := range records[1:] {
-		if record == nil || record.Topic != topic {
-			return "", -1
-		}
-
-		if partition >= 0 && record.Partition != partition {
-			partition = -1
-		}
-	}
-
-	return topic, partition
-}
-
-func errorType(err error) attribute.KeyValue {
+func errorTypeAttribute(err error) attribute.KeyValue {
 	var kafkaErr *kerr.Error
 	if errors.As(err, &kafkaErr) && kafkaErr != nil && kafkaErr.Message != "" {
 		return semconv.ErrorTypeKey.String(kafkaErr.Message)

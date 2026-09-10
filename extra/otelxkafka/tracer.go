@@ -105,7 +105,7 @@ func TracerPropagator(propagator propagation.TextMapPropagator) TracerOpt {
 
 // NewTracer creates a Tracer for xkafka runtime operations.
 func NewTracer(opts ...TracerOpt) *Tracer {
-	cfg := tracerConfig{}
+	var cfg tracerConfig
 
 	for _, opt := range opts {
 		opt.applyTracer(&cfg)
@@ -389,7 +389,7 @@ func (t *Tracer) transactionAttributes(transactionType xkafka.TransactionType) [
 
 func endSpan(span trace.Span, err error, opts ...trace.SpanEndOption) {
 	if err != nil {
-		span.SetAttributes(errorType(err))
+		span.SetAttributes(errorTypeAttribute(err))
 		span.SetStatus(codes.Error, err.Error())
 	}
 

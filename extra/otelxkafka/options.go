@@ -49,9 +49,9 @@ func ShareGroup(group string) ClientOpt {
 }
 
 // Labels configures custom OpenTelemetry attributes.
+// Repeated calls merge labels, with later values replacing duplicate keys.
 func Labels(labels map[string]string) ClientOpt {
-	values := make(map[string]string, len(labels))
-	maps.Copy(values, labels)
+	values := maps.Clone(labels)
 
 	return clientOptFunc(func(cfg *clientConfig) {
 		if len(values) == 0 {
@@ -59,8 +59,10 @@ func Labels(labels map[string]string) ClientOpt {
 		}
 
 		if cfg.labels == nil {
-			cfg.labels = make(map[string]string, len(values))
+			cfg.labels = maps.Clone(values)
+			return
 		}
+
 		maps.Copy(cfg.labels, values)
 	})
 }

@@ -94,7 +94,7 @@ func MeterProvider(provider metric.MeterProvider) MeterOpt {
 
 // NewMeter creates a Meter for xkafka runtime metrics.
 func NewMeter(opts ...MeterOpt) *Meter {
-	cfg := meterConfig{}
+	var cfg meterConfig
 
 	for _, opt := range opts {
 		opt.applyMeter(&cfg)
@@ -129,7 +129,7 @@ func (m *Meter) OnProduceError(record *kgo.Record, err error) {
 		attrs = append(attrs, semconv.MessagingDestinationName(record.Topic))
 	}
 
-	attrs = append(attrs, errorType(err))
+	attrs = append(attrs, errorTypeAttribute(err))
 
 	ctx := context.Background()
 	if record != nil && record.Context != nil {
@@ -154,7 +154,7 @@ func (m *Meter) OnFetchError(ctx context.Context, topic string, partition int32,
 		)
 	}
 
-	attrs = append(attrs, errorType(err))
+	attrs = append(attrs, errorTypeAttribute(err))
 
 	m.instruments.fetchErrors.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
@@ -180,7 +180,7 @@ func (m *Meter) OnHandleEnd(ctx context.Context, records []*kgo.Record, duration
 		}
 
 		if err != nil {
-			attrs = append(attrs, errorType(err))
+			attrs = append(attrs, errorTypeAttribute(err))
 		}
 
 		m.instruments.processDuration.Record(
@@ -215,7 +215,7 @@ func (m *Meter) OnOffsetCommit(ctx context.Context, duration time.Duration, err 
 		m.instruments.clientOperationDuration.AttrOperationType(messagingconv.OperationTypeSettle),
 	)
 	if err != nil {
-		attrs = append(attrs, errorType(err))
+		attrs = append(attrs, errorTypeAttribute(err))
 	}
 
 	m.instruments.clientOperationDuration.Record(
@@ -246,7 +246,7 @@ func (m *Meter) OnShareAckFlush(ctx context.Context, duration time.Duration, err
 		m.instruments.clientOperationDuration.AttrOperationType(messagingconv.OperationTypeSettle),
 	)
 	if err != nil {
-		attrs = append(attrs, errorType(err))
+		attrs = append(attrs, errorTypeAttribute(err))
 	}
 
 	m.instruments.clientOperationDuration.Record(
@@ -273,7 +273,7 @@ func (m *Meter) OnTransactionEnd(
 		transactionOutcomeKey.String(string(outcome)),
 	)
 	if err != nil {
-		attrs = append(attrs, errorType(err))
+		attrs = append(attrs, errorTypeAttribute(err))
 	}
 
 	m.instruments.transactionDuration.Record(
@@ -371,6 +371,27 @@ func (m *Meter) transactionAttributes(transactionType xkafka.TransactionType) []
 	}
 
 	return m.attributes()
+}
+
+func commonRecordDestination(records []*kgo.Record) (topic string, partition int32) {
+	if len(records) == 0 || records[0] == nil {
+		return "", -1
+	}
+
+	topic = records[0].Topic
+	partition = records[0].Partition
+
+	for _, record := range records[1:] {
+		if record == nil || record.Topic != topic {
+			return "", -1
+		}
+
+		if partition >= 0 && record.Partition != partition {
+			partition = -1
+		}
+	}
+
+	return topic, partition
 }
 
 func countRecordsByTopic(records []*kgo.Record) map[string]int64 {
