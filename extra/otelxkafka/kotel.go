@@ -53,17 +53,14 @@ func NewKotel(opts ...Opt) *Kotel {
 }
 
 // Hooks returns xkafka hooks for the configured telemetry components.
-//
-// Each call returns client-scoped hook instances, allowing one Kotel to be
-// reused across multiple xkafka clients and group transaction sessions.
 func (k *Kotel) Hooks() []xkafka.Hook {
 	var hooks []xkafka.Hook
 
 	if k.tracer != nil {
-		hooks = append(hooks, k.tracer.clone())
+		hooks = append(hooks, k.tracer)
 	}
 	if k.meter != nil {
-		hooks = append(hooks, k.meter.clone())
+		hooks = append(hooks, k.meter)
 	}
 
 	return hooks

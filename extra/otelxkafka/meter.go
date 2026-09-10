@@ -16,15 +16,13 @@ import (
 )
 
 var (
-	_ xkafka.HookNewClient               = new(Meter)
-	_ xkafka.HookNewGroupTransactSession = new(Meter)
-	_ xkafka.HookProduceError            = new(Meter)
-	_ xkafka.HookFetchError              = new(Meter)
-	_ xkafka.HookHandleEnd               = new(Meter)
-	_ xkafka.HookOffsetCommit            = new(Meter)
-	_ xkafka.HookShareAck                = new(Meter)
-	_ xkafka.HookShareAckFlush           = new(Meter)
-	_ xkafka.HookTransactionEnd          = new(Meter)
+	_ xkafka.HookProduceError   = new(Meter)
+	_ xkafka.HookFetchError     = new(Meter)
+	_ xkafka.HookHandleEnd      = new(Meter)
+	_ xkafka.HookOffsetCommit   = new(Meter)
+	_ xkafka.HookShareAck       = new(Meter)
+	_ xkafka.HookShareAckFlush  = new(Meter)
+	_ xkafka.HookTransactionEnd = new(Meter)
 )
 
 const (
@@ -44,9 +42,13 @@ type Meter struct {
 	meter       metric.Meter
 	instruments instruments
 
-	clientAttributes attribute.Set
-	consumerGroup    string
-	shareGroup       string
+	clientAttrs   []attribute.KeyValue
+	consumerAttrs []attribute.KeyValue
+}
+
+type meterConfig struct {
+	provider metric.MeterProvider
+	client   clientConfig
 }
 
 type instruments struct {
@@ -70,61 +72,53 @@ type instruments struct {
 
 // MeterOpt configures Meter.
 type MeterOpt interface {
-	apply(*Meter)
+	applyMeter(*meterConfig)
 }
 
-type meterOptFunc func(*Meter)
+type meterOptFunc func(*meterConfig)
 
-func (o meterOptFunc) apply(m *Meter) {
-	o(m)
+func (o meterOptFunc) applyMeter(cfg *meterConfig) {
+	o(cfg)
 }
 
 // MeterProvider configures the OpenTelemetry MeterProvider used by Meter.
 //
 // If none is specified, the global MeterProvider is used.
 func MeterProvider(provider metric.MeterProvider) MeterOpt {
-	return meterOptFunc(func(m *Meter) {
+	return meterOptFunc(func(cfg *meterConfig) {
 		if provider != nil {
-			m.provider = provider
+			cfg.provider = provider
 		}
 	})
 }
 
 // NewMeter creates a Meter for xkafka runtime metrics.
 func NewMeter(opts ...MeterOpt) *Meter {
-	m := &Meter{}
+	cfg := meterConfig{}
 
 	for _, opt := range opts {
-		opt.apply(m)
+		opt.applyMeter(&cfg)
 	}
 
-	if m.provider == nil {
-		m.provider = otel.GetMeterProvider()
+	if cfg.provider == nil {
+		cfg.provider = otel.GetMeterProvider()
 	}
 
+	m := &Meter{provider: cfg.provider}
 	m.meter = m.provider.Meter(
 		instrumentationName,
 		metric.WithInstrumentationVersion(semVersion()),
 		metric.WithSchemaURL(semconv.SchemaURL),
 	)
 	m.instruments = m.newInstruments()
-	m.clientAttributes = attribute.NewSet()
+	m.clientAttrs, m.consumerAttrs = newAttributeSets(
+		cfg.client.clientID,
+		cfg.client.consumerGroup,
+		cfg.client.shareGroup,
+		cfg.client.labels,
+	)
 
 	return m
-}
-
-// OnNewClient implements xkafka.HookNewClient.
-func (m *Meter) OnNewClient(client *xkafka.Client) {
-	m.clientAttributes = newClientAttributes(client.Name(), client.Labels())
-	m.consumerGroup = client.ConsumerGroup()
-	m.shareGroup = client.ShareGroup()
-}
-
-// OnNewGroupTransactSession implements xkafka.HookNewGroupTransactSession.
-func (m *Meter) OnNewGroupTransactSession(session *xkafka.GroupTransactSession) {
-	m.clientAttributes = newClientAttributes(session.Name(), session.Labels())
-	m.consumerGroup = session.ConsumerGroup()
-	m.shareGroup = ""
 }
 
 // OnProduceError implements xkafka.HookProduceError.
@@ -363,31 +357,12 @@ func (m *Meter) newInstruments() instruments {
 	}
 }
 
-// clone creates a client-scoped Meter sharing the configured instruments.
-func (m *Meter) clone() *Meter {
-	return &Meter{
-		provider:         m.provider,
-		meter:            m.meter,
-		instruments:      m.instruments,
-		clientAttributes: attribute.NewSet(),
-	}
-}
-
 func (m *Meter) attributes(extra ...attribute.KeyValue) []attribute.KeyValue {
-	return append(m.clientAttributes.ToSlice(), extra...)
+	return append(m.clientAttrs, extra...)
 }
 
 func (m *Meter) consumerAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {
-	attrs := m.attributes(extra...)
-
-	switch {
-	case m.consumerGroup != "":
-		attrs = append(attrs, semconv.MessagingConsumerGroupName(m.consumerGroup))
-	case m.shareGroup != "":
-		attrs = append(attrs, shareGroupKey.String(m.shareGroup))
-	}
-
-	return attrs
+	return append(m.consumerAttrs, extra...)
 }
 
 func (m *Meter) transactionAttributes(transactionType xkafka.TransactionType) []attribute.KeyValue {

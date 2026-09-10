@@ -2,6 +2,7 @@ package otelxkafka
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -22,18 +23,48 @@ const (
 	shareAckOperationName     = "ack"
 )
 
-func newClientAttributes(name string, labels map[string]string) attribute.Set {
-	var attributes []attribute.KeyValue
+// newAttributeSets builds client and consumer attributes.
+// Consumer attributes extend client attributes with the configured group.
+func newAttributeSets(
+	clientID string,
+	consumerGroup string,
+	shareGroup string,
+	labels map[string]string,
+) (clientAttrs, consumerAttrs []attribute.KeyValue) {
+	var attrs []attribute.KeyValue
 
-	if name != "" {
-		attributes = append(attributes, semconv.MessagingClientID(name))
+	if clientID != "" {
+		attrs = append(attrs, semconv.MessagingClientID(clientID))
 	}
-
 	for key, value := range labels {
-		attributes = append(attributes, attribute.String(key, value))
+		attrs = append(attrs, attribute.String(key, value))
 	}
 
-	return attribute.NewSet(attributes...)
+	clientAttrs = normalizeAttributes(attrs...)
+
+	var groupAttr attribute.KeyValue
+	switch {
+	case consumerGroup != "":
+		groupAttr = semconv.MessagingConsumerGroupName(consumerGroup)
+	case shareGroup != "":
+		groupAttr = shareGroupKey.String(shareGroup)
+	default:
+		return clientAttrs, clientAttrs
+	}
+
+	// Prevent consumerAttrs from sharing writable capacity with clientAttrs.
+	consumerAttrs = append(
+		clientAttrs[:len(clientAttrs):len(clientAttrs)],
+		groupAttr,
+	)
+
+	return clientAttrs, normalizeAttributes(consumerAttrs...)
+}
+
+// normalizeAttributes returns normalized attributes with no spare slice capacity.
+func normalizeAttributes(attrs ...attribute.KeyValue) []attribute.KeyValue {
+	set := attribute.NewSet(attrs...)
+	return slices.Clip(set.ToSlice())
 }
 
 func commonRecordDestination(records []*kgo.Record) (topic string, partition int32) {

@@ -16,17 +16,15 @@ import (
 )
 
 var (
-	_ xkafka.HookNewClient               = new(Tracer)
-	_ xkafka.HookNewGroupTransactSession = new(Tracer)
-	_ xkafka.HookProduceStart            = new(Tracer)
-	_ xkafka.HookProduceRecord           = new(Tracer)
-	_ xkafka.HookProduceEnd              = new(Tracer)
-	_ xkafka.HookHandleStart             = new(Tracer)
-	_ xkafka.HookHandleEnd               = new(Tracer)
-	_ xkafka.HookOffsetCommit            = new(Tracer)
-	_ xkafka.HookShareAckFlush           = new(Tracer)
-	_ xkafka.HookTransactionStart        = new(Tracer)
-	_ xkafka.HookTransactionEnd          = new(Tracer)
+	_ xkafka.HookProduceStart     = new(Tracer)
+	_ xkafka.HookProduceRecord    = new(Tracer)
+	_ xkafka.HookProduceEnd       = new(Tracer)
+	_ xkafka.HookHandleStart      = new(Tracer)
+	_ xkafka.HookHandleEnd        = new(Tracer)
+	_ xkafka.HookOffsetCommit     = new(Tracer)
+	_ xkafka.HookShareAckFlush    = new(Tracer)
+	_ xkafka.HookTransactionStart = new(Tracer)
+	_ xkafka.HookTransactionEnd   = new(Tracer)
 )
 
 const transactionSpanName = "xkafka.transaction"
@@ -61,29 +59,34 @@ type Tracer struct {
 	propagator propagation.TextMapPropagator
 	tracer     trace.Tracer
 
-	clientAttributes attribute.Set
-	consumerGroup    string
-	shareGroup       string
+	clientAttrs   []attribute.KeyValue
+	consumerAttrs []attribute.KeyValue
+}
+
+type tracerConfig struct {
+	provider   trace.TracerProvider
+	propagator propagation.TextMapPropagator
+	client     clientConfig
 }
 
 // TracerOpt configures Tracer.
 type TracerOpt interface {
-	apply(*Tracer)
+	applyTracer(*tracerConfig)
 }
 
-type tracerOptFunc func(*Tracer)
+type tracerOptFunc func(*tracerConfig)
 
-func (o tracerOptFunc) apply(t *Tracer) {
-	o(t)
+func (o tracerOptFunc) applyTracer(cfg *tracerConfig) {
+	o(cfg)
 }
 
 // TracerProvider configures the OpenTelemetry TracerProvider used by Tracer.
 //
 // If none is specified, the global TracerProvider is used.
 func TracerProvider(provider trace.TracerProvider) TracerOpt {
-	return tracerOptFunc(func(t *Tracer) {
+	return tracerOptFunc(func(cfg *tracerConfig) {
 		if provider != nil {
-			t.provider = provider
+			cfg.provider = provider
 		}
 	})
 }
@@ -93,50 +96,45 @@ func TracerProvider(provider trace.TracerProvider) TracerOpt {
 //
 // If none is specified, the global TextMapPropagator is used.
 func TracerPropagator(propagator propagation.TextMapPropagator) TracerOpt {
-	return tracerOptFunc(func(t *Tracer) {
+	return tracerOptFunc(func(cfg *tracerConfig) {
 		if propagator != nil {
-			t.propagator = propagator
+			cfg.propagator = propagator
 		}
 	})
 }
 
 // NewTracer creates a Tracer for xkafka runtime operations.
 func NewTracer(opts ...TracerOpt) *Tracer {
-	t := &Tracer{}
+	cfg := tracerConfig{}
 
 	for _, opt := range opts {
-		opt.apply(t)
+		opt.applyTracer(&cfg)
 	}
 
-	if t.provider == nil {
-		t.provider = otel.GetTracerProvider()
+	if cfg.provider == nil {
+		cfg.provider = otel.GetTracerProvider()
 	}
-	if t.propagator == nil {
-		t.propagator = otel.GetTextMapPropagator()
+	if cfg.propagator == nil {
+		cfg.propagator = otel.GetTextMapPropagator()
 	}
 
+	t := &Tracer{
+		provider:   cfg.provider,
+		propagator: cfg.propagator,
+	}
 	t.tracer = t.provider.Tracer(
 		instrumentationName,
 		trace.WithInstrumentationVersion(semVersion()),
 		trace.WithSchemaURL(semconv.SchemaURL),
 	)
-	t.clientAttributes = attribute.NewSet()
+	t.clientAttrs, t.consumerAttrs = newAttributeSets(
+		cfg.client.clientID,
+		cfg.client.consumerGroup,
+		cfg.client.shareGroup,
+		cfg.client.labels,
+	)
 
 	return t
-}
-
-// OnNewClient implements xkafka.HookNewClient.
-func (t *Tracer) OnNewClient(client *xkafka.Client) {
-	t.clientAttributes = newClientAttributes(client.Name(), client.Labels())
-	t.consumerGroup = client.ConsumerGroup()
-	t.shareGroup = client.ShareGroup()
-}
-
-// OnNewGroupTransactSession implements xkafka.HookNewGroupTransactSession.
-func (t *Tracer) OnNewGroupTransactSession(session *xkafka.GroupTransactSession) {
-	t.clientAttributes = newClientAttributes(session.Name(), session.Labels())
-	t.consumerGroup = session.ConsumerGroup()
-	t.shareGroup = ""
 }
 
 // OnProduceStart implements xkafka.HookProduceStart.
@@ -293,16 +291,6 @@ func (t *Tracer) OnTransactionEnd(
 	endSpan(span, err)
 }
 
-// clone creates a client-scoped Tracer sharing the configured tracer and propagator.
-func (t *Tracer) clone() *Tracer {
-	return &Tracer{
-		provider:         t.provider,
-		propagator:       t.propagator,
-		tracer:           t.tracer,
-		clientAttributes: attribute.NewSet(),
-	}
-}
-
 // recordSettlementSpan records a completed settlement operation using its duration.
 func (t *Tracer) recordSettlementSpan(ctx context.Context, operationName string, duration time.Duration, err error) {
 	endTime := time.Now()
@@ -384,20 +372,11 @@ func (t *Tracer) spanFromContext(ctx context.Context, kind spanType) trace.Span 
 }
 
 func (t *Tracer) attributes(extra ...attribute.KeyValue) []attribute.KeyValue {
-	return append(t.clientAttributes.ToSlice(), extra...)
+	return append(t.clientAttrs, extra...)
 }
 
 func (t *Tracer) consumerAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {
-	attrs := t.attributes(extra...)
-
-	switch {
-	case t.consumerGroup != "":
-		attrs = append(attrs, semconv.MessagingConsumerGroupName(t.consumerGroup))
-	case t.shareGroup != "":
-		attrs = append(attrs, shareGroupKey.String(t.shareGroup))
-	}
-
-	return attrs
+	return append(t.consumerAttrs, extra...)
 }
 
 func (t *Tracer) transactionAttributes(transactionType xkafka.TransactionType) []attribute.KeyValue {
