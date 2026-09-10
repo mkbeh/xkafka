@@ -52,6 +52,27 @@ type HookGroupTransactSessionClosed interface {
 	OnGroupTransactSessionClosed(*GroupTransactSession)
 }
 
+// HookProduceStart is called before a synchronous produce operation starts.
+//
+// The returned context is passed to HookProduceRecord, the produce operation,
+// and HookProduceEnd.
+type HookProduceStart interface {
+	OnProduceStart(ctx context.Context, records []*kgo.Record) context.Context
+}
+
+// HookProduceRecord is called before a record is passed to franz-go for producing.
+//
+// Implementations may modify the record before it is passed to franz-go, for
+// example to inject propagation headers.
+type HookProduceRecord interface {
+	OnProduceRecord(ctx context.Context, record *kgo.Record)
+}
+
+// HookProduceEnd is called after a synchronous produce operation ends.
+type HookProduceEnd interface {
+	OnProduceEnd(ctx context.Context, records []*kgo.Record, duration time.Duration, err error)
+}
+
 // HookProduceError is called when producing a record fails.
 type HookProduceError interface {
 	OnProduceError(record *kgo.Record, err error)
@@ -161,6 +182,32 @@ func (hs hooks) onGroupTransactSessionClosed(session *GroupTransactSession) {
 	})
 }
 
+func (hs hooks) onProduceStart(ctx context.Context, records []*kgo.Record) context.Context {
+	hs.each(func(h Hook) {
+		if h, ok := h.(HookProduceStart); ok {
+			ctx = h.OnProduceStart(ctx, records)
+		}
+	})
+
+	return ctx
+}
+
+func (hs hooks) onProduceRecord(ctx context.Context, record *kgo.Record) {
+	hs.each(func(h Hook) {
+		if h, ok := h.(HookProduceRecord); ok {
+			h.OnProduceRecord(ctx, record)
+		}
+	})
+}
+
+func (hs hooks) onProduceEnd(ctx context.Context, records []*kgo.Record, duration time.Duration, err error) {
+	hs.each(func(h Hook) {
+		if h, ok := h.(HookProduceEnd); ok {
+			h.OnProduceEnd(ctx, records, duration, err)
+		}
+	})
+}
+
 func (hs hooks) onProduceError(record *kgo.Record, err error) {
 	hs.each(func(h Hook) {
 		if h, ok := h.(HookProduceError); ok {
@@ -248,6 +295,9 @@ func implementsAnyHook(h Hook) bool {
 		HookClientClosed,
 		HookNewGroupTransactSession,
 		HookGroupTransactSessionClosed,
+		HookProduceStart,
+		HookProduceRecord,
+		HookProduceEnd,
 		HookProduceError,
 		HookFetchError,
 		HookOffsetCommit,

@@ -11,7 +11,8 @@ func (c recordCarrier) Get(key string) string {
 		return ""
 	}
 
-	for _, header := range c.record.Headers {
+	for i := range c.record.Headers {
+		header := &c.record.Headers[i]
 		if header.Key == key {
 			return string(header.Value)
 		}
@@ -25,9 +26,10 @@ func (c recordCarrier) Set(key, value string) {
 		return
 	}
 
-	for i, header := range c.record.Headers {
+	for i := range c.record.Headers {
+		header := &c.record.Headers[i]
 		if header.Key == key {
-			c.record.Headers[i].Value = []byte(value)
+			header.Value = []byte(value)
 			return
 		}
 	}
@@ -44,8 +46,8 @@ func (c recordCarrier) Keys() []string {
 	}
 
 	keys := make([]string, len(c.record.Headers))
-	for i, header := range c.record.Headers {
-		keys[i] = header.Key
+	for i := range c.record.Headers {
+		keys[i] = c.record.Headers[i].Key
 	}
 
 	return keys

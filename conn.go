@@ -111,6 +111,8 @@ func newClient(opts ...Opt) (*client, error) {
 }
 
 func (c *client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.hooks.onProduceRecord(recordContext(ctx, record), record)
+
 	if promise == nil {
 		c.conn.Produce(ctx, record, c.defaultPromise)
 		return
@@ -120,6 +122,8 @@ func (c *client) Produce(ctx context.Context, record *kgo.Record, promise Promis
 }
 
 func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
+	c.hooks.onProduceRecord(recordContext(ctx, record), record)
+
 	if promise == nil {
 		c.conn.TryProduce(ctx, record, c.defaultPromise)
 		return
@@ -129,33 +133,54 @@ func (c *client) TryProduce(ctx context.Context, record *kgo.Record, promise Pro
 }
 
 func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
-	var first kgo.ProduceResult
+	ctx = c.hooks.onProduceStart(ctx, records)
 
+	for _, record := range records {
+		c.hooks.onProduceRecord(ctx, record)
+	}
+
+	startTime := time.Now()
 	results := c.conn.ProduceSync(ctx, records...)
-	for _, result := range results {
+	duration := time.Since(startTime)
+
+	var (
+		firstErr    error
+		firstRecord *kgo.Record
+	)
+
+	for i := range results {
+		result := &results[i]
 		if result.Err == nil {
 			continue
 		}
 
 		c.hooks.onProduceError(result.Record, result.Err)
 
-		if first.Err == nil {
-			first = result
+		if firstErr == nil {
+			firstErr = result.Err
+			firstRecord = result.Record
 		}
 	}
 
-	if first.Err == nil {
+	var err error
+	if firstErr != nil {
+		err = fmt.Errorf("kafka: produce records: %w", firstErr)
+	}
+
+	c.hooks.onProduceEnd(ctx, records, duration, err)
+
+	if err == nil {
 		return nil
 	}
 
 	if c.logEnabled(kgo.LogLevelError) {
 		c.log(kgo.LogLevelError, "error producing records",
-			logKeyError, first.Err,
-			logKeyRecord, c.formatRecord(first.Record),
+			logKeyError, firstErr,
+			logKeyRecord, c.formatRecord(firstRecord),
 		)
 	}
 
-	return fmt.Errorf("kafka: produce records: %w", first.Err)
+	return err
 }
 
 func (c *client) HandleFetches(ctx context.Context) error {
@@ -360,6 +385,14 @@ func (c *client) produceErrorPromise(record *kgo.Record, err error) {
 
 func (c *client) formatRecord(record *kgo.Record) string {
 	return string(c.formatter.AppendRecord(nil, record))
+}
+
+func recordContext(ctx context.Context, record *kgo.Record) context.Context {
+	if record != nil && record.Context != nil {
+		return record.Context
+	}
+
+	return ctx
 }
 
 func (c *client) wait(ctx context.Context, delay time.Duration) bool {

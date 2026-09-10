@@ -39,6 +39,19 @@ func WithMeter(meter *Meter) Opt {
 	})
 }
 
+// NewKotel creates a Kotel and applies opts to it.
+func NewKotel(opts ...Opt) *Kotel {
+	k := &Kotel{}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt.apply(k)
+		}
+	}
+
+	return k
+}
+
 // Hooks returns xkafka hooks for the configured telemetry components.
 //
 // Each call returns client-scoped hook instances, allowing one Kotel to be
@@ -54,15 +67,4 @@ func (k *Kotel) Hooks() []xkafka.Hook {
 	}
 
 	return hooks
-}
-
-// NewKotel creates a Kotel and applies opts to it.
-func NewKotel(opts ...Opt) *Kotel {
-	k := &Kotel{}
-
-	for _, opt := range opts {
-		opt.apply(k)
-	}
-
-	return k
 }

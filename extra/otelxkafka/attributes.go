@@ -15,20 +15,21 @@ const (
 	transactionOutcomeKey    attribute.Key = "xkafka.transaction.outcome"
 	transactionTypeKey       attribute.Key = "xkafka.transaction.type"
 
+	sendOperationName         = "send"
 	processOperationName      = "process"
 	offsetCommitOperationName = "commit"
 	shareAckOperationName     = "ack"
 )
 
 func newClientAttributes(name string, labels map[string]string) attribute.Set {
-	attributes := make([]attribute.KeyValue, 0, len(labels)+1)
-
-	for key, value := range labels {
-		attributes = append(attributes, attribute.String(key, value))
-	}
+	var attributes []attribute.KeyValue
 
 	if name != "" {
 		attributes = append(attributes, semconv.MessagingClientID(name))
+	}
+
+	for key, value := range labels {
+		attributes = append(attributes, attribute.String(key, value))
 	}
 
 	return attribute.NewSet(attributes...)

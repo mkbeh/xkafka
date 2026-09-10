@@ -20,8 +20,8 @@ var (
 	_ xkafka.HookNewGroupTransactSession = new(Meter)
 	_ xkafka.HookProduceError            = new(Meter)
 	_ xkafka.HookFetchError              = new(Meter)
-	_ xkafka.HookOffsetCommit            = new(Meter)
 	_ xkafka.HookHandleEnd               = new(Meter)
+	_ xkafka.HookOffsetCommit            = new(Meter)
 	_ xkafka.HookShareAck                = new(Meter)
 	_ xkafka.HookShareAckFlush           = new(Meter)
 	_ xkafka.HookTransactionEnd          = new(Meter)
@@ -35,43 +35,8 @@ const (
 	transactionDurationMetricName = "xkafka.transaction.duration"
 )
 
-var (
-	messagingDurationBuckets = []float64{
-		0.005,
-		0.01,
-		0.025,
-		0.05,
-		0.075,
-		0.1,
-		0.25,
-		0.5,
-		0.75,
-		1,
-		2.5,
-		5,
-		7.5,
-		10,
-	}
-	transactionDurationBuckets = []float64{
-		0.005,
-		0.01,
-		0.025,
-		0.05,
-		0.075,
-		0.1,
-		0.25,
-		0.5,
-		0.75,
-		1,
-		2.5,
-		5,
-		7.5,
-		10,
-		15,
-		30,
-		60,
-	}
-)
+// durationBuckets are histogram boundaries in seconds.
+var durationBuckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
 // Meter exports xkafka runtime metrics through OpenTelemetry hooks.
 type Meter struct {
@@ -82,6 +47,25 @@ type Meter struct {
 	clientAttributes attribute.Set
 	consumerGroup    string
 	shareGroup       string
+}
+
+type instruments struct {
+	// Producer.
+	produceErrors metric.Int64Counter
+
+	// Consumer.
+	fetchErrors             metric.Int64Counter
+	clientOperationDuration messagingconv.ClientOperationDuration
+
+	// Handler.
+	processDuration messagingconv.ProcessDuration
+	handleRecords   metric.Int64Counter
+
+	// Share Group.
+	shareAckRecords metric.Int64Counter
+
+	// Transactions.
+	transactionDuration metric.Float64Histogram
 }
 
 // MeterOpt configures Meter.
@@ -129,68 +113,35 @@ func NewMeter(opts ...MeterOpt) *Meter {
 	return m
 }
 
-func (m *Meter) clone() *Meter {
-	clone := *m
-	clone.clientAttributes = attribute.NewSet()
-	clone.consumerGroup = ""
-	clone.shareGroup = ""
-	return &clone
-}
-
-func (m *Meter) setRuntime(
-	name string,
-	labels map[string]string,
-	consumerGroup string,
-	shareGroup string,
-) {
-	m.clientAttributes = newClientAttributes(name, labels)
-	m.consumerGroup = consumerGroup
-	m.shareGroup = shareGroup
-}
-
+// OnNewClient implements xkafka.HookNewClient.
 func (m *Meter) OnNewClient(client *xkafka.Client) {
-	m.setRuntime(
-		client.Name(),
-		client.Labels(),
-		client.ConsumerGroup(),
-		client.ShareGroup(),
-	)
+	m.clientAttributes = newClientAttributes(client.Name(), client.Labels())
+	m.consumerGroup = client.ConsumerGroup()
+	m.shareGroup = client.ShareGroup()
 }
 
+// OnNewGroupTransactSession implements xkafka.HookNewGroupTransactSession.
 func (m *Meter) OnNewGroupTransactSession(session *xkafka.GroupTransactSession) {
-	m.setRuntime(
-		session.Name(),
-		session.Labels(),
-		session.ConsumerGroup(),
-		"",
-	)
+	m.clientAttributes = newClientAttributes(session.Name(), session.Labels())
+	m.consumerGroup = session.ConsumerGroup()
+	m.shareGroup = ""
 }
 
+// OnProduceError implements xkafka.HookProduceError.
 func (m *Meter) OnProduceError(record *kgo.Record, err error) {
 	attrs := appendRecordAttributes(m.attributes(), record)
-	if err != nil {
-		attrs = append(attrs, errorType(err))
-	}
+	attrs = append(attrs, errorType(err))
 
 	ctx := context.Background()
 	if record != nil && record.Context != nil {
 		ctx = record.Context
 	}
 
-	m.instruments.produceErrors.Add(
-		ctx,
-		1,
-		metric.WithAttributes(attrs...),
-	)
+	m.instruments.produceErrors.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
-func (m *Meter) OnFetchError(
-	ctx context.Context,
-	topic string,
-	partition int32,
-	recoverable bool,
-	err error,
-) {
+// OnFetchError implements xkafka.HookFetchError.
+func (m *Meter) OnFetchError(ctx context.Context, topic string, partition int32, recoverable bool, err error) {
 	attrs := m.consumerAttributes(
 		fetchErrorRecoverableKey.Bool(recoverable),
 	)
@@ -203,17 +154,60 @@ func (m *Meter) OnFetchError(
 			semconv.MessagingDestinationPartitionID(strconv.FormatInt(int64(partition), 10)),
 		)
 	}
-	if err != nil {
-		attrs = append(attrs, errorType(err))
-	}
 
-	m.instruments.fetchErrors.Add(
-		ctx,
-		1,
-		metric.WithAttributes(attrs...),
-	)
+	attrs = append(attrs, errorType(err))
+
+	m.instruments.fetchErrors.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
+// OnHandleEnd implements xkafka.HookHandleEnd.
+func (m *Meter) OnHandleEnd(ctx context.Context, records []*kgo.Record, duration time.Duration, err error) {
+	processEnabled := m.instruments.processDuration.Enabled(ctx)
+	handleEnabled := err == nil && m.instruments.handleRecords.Enabled(ctx)
+
+	if !processEnabled && !handleEnabled {
+		return
+	}
+
+	// Derived attribute slices are capped before appending so baseAttrs remains reusable.
+	baseAttrs := m.consumerAttributes()
+
+	if processEnabled {
+		attrs := baseAttrs
+		if err != nil {
+			attrs = append(
+				attrs[:len(attrs):len(attrs)],
+				errorType(err),
+			)
+		}
+
+		m.instruments.processDuration.Record(
+			ctx,
+			duration.Seconds(),
+			processOperationName,
+			messagingconv.SystemKafka,
+			attrs...,
+		)
+	}
+
+	if !handleEnabled {
+		return
+	}
+
+	for topic, count := range countRecordsByTopic(records) {
+		attrs := baseAttrs
+		if topic != "" {
+			attrs = append(
+				attrs[:len(attrs):len(attrs)],
+				semconv.MessagingDestinationName(topic),
+			)
+		}
+
+		m.instruments.handleRecords.Add(ctx, count, metric.WithAttributes(attrs...))
+	}
+}
+
+// OnOffsetCommit implements xkafka.HookOffsetCommit.
 func (m *Meter) OnOffsetCommit(ctx context.Context, duration time.Duration, err error) {
 	attrs := m.consumerAttributes(
 		m.instruments.clientOperationDuration.AttrOperationType(messagingconv.OperationTypeSettle),
@@ -231,50 +225,8 @@ func (m *Meter) OnOffsetCommit(ctx context.Context, duration time.Duration, err 
 	)
 }
 
-func (m *Meter) OnHandleEnd(
-	ctx context.Context,
-	records []*kgo.Record,
-	duration time.Duration,
-	err error,
-) {
-	if m.instruments.processDuration.Enabled(ctx) {
-		attrs := m.consumerAttributes()
-		if err != nil {
-			attrs = append(attrs, errorType(err))
-		}
-
-		m.instruments.processDuration.Record(
-			ctx,
-			duration.Seconds(),
-			processOperationName,
-			messagingconv.SystemKafka,
-			attrs...,
-		)
-	}
-
-	if err != nil || !m.instruments.handleRecords.Enabled(ctx) {
-		return
-	}
-
-	for topic, count := range countRecordsByTopic(records) {
-		attrs := m.consumerAttributes()
-		if topic != "" {
-			attrs = append(attrs, semconv.MessagingDestinationName(topic))
-		}
-
-		m.instruments.handleRecords.Add(
-			ctx,
-			count,
-			metric.WithAttributes(attrs...),
-		)
-	}
-}
-
-func (m *Meter) OnShareAck(
-	ctx context.Context,
-	outcome xkafka.ShareAckOutcome,
-	recordCount int,
-) {
+// OnShareAck implements xkafka.HookShareAck.
+func (m *Meter) OnShareAck(ctx context.Context, outcome xkafka.ShareAckOutcome, recordCount int) {
 	attrs := m.consumerAttributes(
 		shareAckOutcomeKey.String(string(outcome)),
 	)
@@ -286,6 +238,7 @@ func (m *Meter) OnShareAck(
 	)
 }
 
+// OnShareAckFlush implements xkafka.HookShareAckFlush.
 func (m *Meter) OnShareAckFlush(ctx context.Context, duration time.Duration, err error) {
 	attrs := m.consumerAttributes(
 		m.instruments.clientOperationDuration.AttrOperationType(messagingconv.OperationTypeSettle),
@@ -303,6 +256,7 @@ func (m *Meter) OnShareAckFlush(ctx context.Context, duration time.Duration, err
 	)
 }
 
+// OnTransactionEnd implements xkafka.HookTransactionEnd.
 func (m *Meter) OnTransactionEnd(
 	ctx context.Context,
 	transactionType xkafka.TransactionType,
@@ -327,33 +281,14 @@ func (m *Meter) OnTransactionEnd(
 	)
 }
 
-type instruments struct {
-	// Producer.
-	produceErrors metric.Int64Counter
-
-	// Consumer.
-	fetchErrors             metric.Int64Counter
-	clientOperationDuration messagingconv.ClientOperationDuration
-
-	// Handler.
-	processDuration messagingconv.ProcessDuration
-	handleRecords   metric.Int64Counter
-
-	// Share Group.
-	shareAckRecords metric.Int64Counter
-
-	// Transactions.
-	transactionDuration metric.Float64Histogram
-}
-
 func (m *Meter) newInstruments() instruments {
 	produceErrors, err := m.meter.Int64Counter(
 		produceErrorsMetricName,
 		metric.WithDescription("The number of records that failed to produce."),
-		metric.WithUnit("{error}"),
+		metric.WithUnit("{record}"),
 	)
 	if err != nil {
-		log.Printf("failed to create produceErrors instrument, %v", err)
+		log.Printf("failed to create produce errors instrument, %v", err)
 	}
 
 	fetchErrors, err := m.meter.Int64Counter(
@@ -362,23 +297,23 @@ func (m *Meter) newInstruments() instruments {
 		metric.WithUnit("{error}"),
 	)
 	if err != nil {
-		log.Printf("failed to create fetchErrors instrument, %v", err)
+		log.Printf("failed to create fetch errors instrument, %v", err)
 	}
 
 	clientOperationDuration, err := messagingconv.NewClientOperationDuration(
 		m.meter,
-		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
+		metric.WithExplicitBucketBoundaries(durationBuckets...),
 	)
 	if err != nil {
-		log.Printf("failed to create clientOperationDuration instrument, %v", err)
+		log.Printf("failed to create client operation duration instrument, %v", err)
 	}
 
 	processDuration, err := messagingconv.NewProcessDuration(
 		m.meter,
-		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
+		metric.WithExplicitBucketBoundaries(durationBuckets...),
 	)
 	if err != nil {
-		log.Printf("failed to create processDuration instrument, %v", err)
+		log.Printf("failed to create process duration instrument, %v", err)
 	}
 
 	handleRecords, err := m.meter.Int64Counter(
@@ -387,7 +322,7 @@ func (m *Meter) newInstruments() instruments {
 		metric.WithUnit("{record}"),
 	)
 	if err != nil {
-		log.Printf("failed to create handleRecords instrument, %v", err)
+		log.Printf("failed to create handler records instrument, %v", err)
 	}
 
 	shareAckRecords, err := m.meter.Int64Counter(
@@ -396,17 +331,17 @@ func (m *Meter) newInstruments() instruments {
 		metric.WithUnit("{record}"),
 	)
 	if err != nil {
-		log.Printf("failed to create shareAckRecords instrument, %v", err)
+		log.Printf("failed to create share ack records instrument, %v", err)
 	}
 
 	transactionDuration, err := m.meter.Float64Histogram(
 		transactionDurationMetricName,
 		metric.WithDescription("The duration of xkafka transaction attempts."),
 		metric.WithUnit("s"),
-		metric.WithExplicitBucketBoundaries(transactionDurationBuckets...),
+		metric.WithExplicitBucketBoundaries(durationBuckets...),
 	)
 	if err != nil {
-		log.Printf("failed to create transactionDuration instrument, %v", err)
+		log.Printf("failed to create transaction duration instrument, %v", err)
 	}
 
 	return instruments{
@@ -420,9 +355,18 @@ func (m *Meter) newInstruments() instruments {
 	}
 }
 
+// clone creates a client-scoped Meter sharing the configured instruments.
+func (m *Meter) clone() *Meter {
+	return &Meter{
+		provider:         m.provider,
+		meter:            m.meter,
+		instruments:      m.instruments,
+		clientAttributes: attribute.NewSet(),
+	}
+}
+
 func (m *Meter) attributes(extra ...attribute.KeyValue) []attribute.KeyValue {
-	attrs := m.clientAttributes.ToSlice()
-	return append(attrs[:len(attrs):len(attrs)], extra...)
+	return append(m.clientAttributes.ToSlice(), extra...)
 }
 
 func (m *Meter) consumerAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {

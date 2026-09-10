@@ -2,7 +2,7 @@
 
 `otelxkafka` provides optional OpenTelemetry metrics and tracing for `xkafka` runtime behavior through the xkafka hook API.
 
-It complements `franz-go/plugin/kotel`: native `kotel` hooks instrument franz-go client and record operations, while `otelxkafka` instruments xkafka handler processing, settlement operations, Share Group acknowledgements, and transactions.
+It is designed to coexist with `franz-go/plugin/kotel.Meter`: native `kotel` metrics cover franz-go client and broker operations, while `otelxkafka` covers xkafka runtime metrics and batch-oriented tracing. `otelxkafka.Tracer` handles trace propagation itself and should not be combined with `franz-go/plugin/kotel.Tracer`, which adds per-record publish and receive spans.
 
 Applications own the OpenTelemetry SDK lifecycle and exporter configuration.
 
@@ -85,6 +85,8 @@ Native franz-go client metrics are intentionally left to `franz-go/plugin/kotel.
 
 ## Tracing
 
-`Tracer` adds xkafka runtime spans for handler processing, offset commit and Share Group acknowledgement settlement, and transaction attempts.
+`Tracer` creates one producer `send` span for each `ProduceSync` operation and propagates that span context through every record in the batch. The span includes standard messaging attributes such as the client ID, operation, batch message count, and destination when the whole batch targets one topic.
 
-For end-to-end Kafka record tracing and header propagation, use it together with `franz-go/plugin/kotel.Tracer` and configure both tracers with the same `TextMapPropagator`.
+`Produce` and `TryProduce` remain propagation-only so asynchronous record production does not create one producer span per record.
+
+Consumer handler spans link to unique sampled message creation contexts extracted from the batch. This keeps tracing batch-oriented and avoids creating one publish and one receive span for every record. `Tracer` also traces offset commit and Share Group acknowledgement settlement, and transaction attempts.
