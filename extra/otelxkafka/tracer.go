@@ -408,27 +408,6 @@ func (t *Tracer) transactionAttributes(transactionType xkafka.TransactionType) [
 	return t.attributes()
 }
 
-func commonRecordDestination(records []*kgo.Record) (topic string, partition int32) {
-	if len(records) == 0 || records[0] == nil {
-		return "", -1
-	}
-
-	topic = records[0].Topic
-	partition = records[0].Partition
-
-	for _, record := range records[1:] {
-		if record == nil || record.Topic != topic {
-			return "", -1
-		}
-
-		if partition >= 0 && record.Partition != partition {
-			partition = -1
-		}
-	}
-
-	return topic, partition
-}
-
 func endSpan(span trace.Span, err error, opts ...trace.SpanEndOption) {
 	if err != nil {
 		span.SetAttributes(errorType(err))

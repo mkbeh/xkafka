@@ -129,7 +129,12 @@ func (m *Meter) OnNewGroupTransactSession(session *xkafka.GroupTransactSession) 
 
 // OnProduceError implements xkafka.HookProduceError.
 func (m *Meter) OnProduceError(record *kgo.Record, err error) {
-	attrs := appendRecordAttributes(m.attributes(), record)
+	attrs := m.attributes()
+
+	if record != nil && record.Topic != "" {
+		attrs = append(attrs, semconv.MessagingDestinationName(record.Topic))
+	}
+
 	attrs = append(attrs, errorType(err))
 
 	ctx := context.Background()
@@ -173,12 +178,15 @@ func (m *Meter) OnHandleEnd(ctx context.Context, records []*kgo.Record, duration
 	baseAttrs := m.consumerAttributes()
 
 	if processEnabled {
-		attrs := baseAttrs
+		attrs := baseAttrs[:len(baseAttrs):len(baseAttrs)]
+
+		topic, _ := commonRecordDestination(records)
+		if topic != "" {
+			attrs = append(attrs, semconv.MessagingDestinationName(topic))
+		}
+
 		if err != nil {
-			attrs = append(
-				attrs[:len(attrs):len(attrs)],
-				errorType(err),
-			)
+			attrs = append(attrs, errorType(err))
 		}
 
 		m.instruments.processDuration.Record(
@@ -388,24 +396,6 @@ func (m *Meter) transactionAttributes(transactionType xkafka.TransactionType) []
 	}
 
 	return m.attributes()
-}
-
-func appendRecordAttributes(attrs []attribute.KeyValue, record *kgo.Record) []attribute.KeyValue {
-	if record == nil {
-		return attrs
-	}
-
-	if record.Topic != "" {
-		attrs = append(attrs, semconv.MessagingDestinationName(record.Topic))
-	}
-	if record.Partition >= 0 {
-		attrs = append(
-			attrs,
-			semconv.MessagingDestinationPartitionID(strconv.FormatInt(int64(record.Partition), 10)),
-		)
-	}
-
-	return attrs
 }
 
 func countRecordsByTopic(records []*kgo.Record) map[string]int64 {
