@@ -105,7 +105,7 @@ func TracerPropagator(propagator propagation.TextMapPropagator) TracerOpt {
 
 // NewTracer creates a Tracer for xkafka runtime operations.
 func NewTracer(opts ...TracerOpt) *Tracer {
-	var cfg tracerConfig
+	cfg := tracerConfig{}
 
 	for _, opt := range opts {
 		opt.applyTracer(&cfg)
@@ -123,8 +123,8 @@ func NewTracer(opts ...TracerOpt) *Tracer {
 		propagator: cfg.propagator,
 	}
 	t.tracer = t.provider.Tracer(
-		instrumentationName,
-		trace.WithInstrumentationVersion(semVersion()),
+		ScopeName,
+		trace.WithInstrumentationVersion(Version()),
 		trace.WithSchemaURL(semconv.SchemaURL),
 	)
 	t.clientAttrs, t.consumerAttrs = newAttributeSets(

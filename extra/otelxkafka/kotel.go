@@ -2,8 +2,6 @@ package otelxkafka
 
 import "github.com/mkbeh/xkafka"
 
-const instrumentationName = "github.com/mkbeh/xkafka/extra/otelxkafka"
-
 // Kotel combines OpenTelemetry meter and tracer hooks for xkafka.
 type Kotel struct {
 	meter  *Meter

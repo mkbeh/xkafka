@@ -94,7 +94,7 @@ func MeterProvider(provider metric.MeterProvider) MeterOpt {
 
 // NewMeter creates a Meter for xkafka runtime metrics.
 func NewMeter(opts ...MeterOpt) *Meter {
-	var cfg meterConfig
+	cfg := meterConfig{}
 
 	for _, opt := range opts {
 		opt.applyMeter(&cfg)
@@ -106,8 +106,8 @@ func NewMeter(opts ...MeterOpt) *Meter {
 
 	m := &Meter{provider: cfg.provider}
 	m.meter = m.provider.Meter(
-		instrumentationName,
-		metric.WithInstrumentationVersion(semVersion()),
+		ScopeName,
+		metric.WithInstrumentationVersion(Version()),
 		metric.WithSchemaURL(semconv.SchemaURL),
 	)
 	m.instruments = m.newInstruments()

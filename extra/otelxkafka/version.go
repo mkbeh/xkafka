@@ -2,18 +2,25 @@ package otelxkafka
 
 import "runtime/debug"
 
-// semVersion returns the semantic version supplied to tracer and meter creation.
-func semVersion() string {
-	v := "unknown"
+// ScopeName is the OpenTelemetry instrumentation scope name.
+const ScopeName = "github.com/mkbeh/xkafka/extra/otelxkafka"
 
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, dep := range info.Deps {
-			if dep.Path == instrumentationName {
-				v = dep.Version
-				break
-			}
+// Version returns the version of the otelxkafka instrumentation module.
+func Version() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+
+	if info.Main.Path == ScopeName {
+		return info.Main.Version
+	}
+
+	for _, dep := range info.Deps {
+		if dep.Path == ScopeName {
+			return dep.Version
 		}
 	}
 
-	return "semver:" + v
+	return "unknown"
 }
