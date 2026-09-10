@@ -38,7 +38,6 @@ func WithMeter(meter *Meter) Opt {
 }
 
 // NewKotel creates a Kotel and applies opts to it.
-// NewKotel creates a Kotel and applies opts to it.
 func NewKotel(opts ...Opt) *Kotel {
 	k := &Kotel{}
 
