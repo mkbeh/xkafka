@@ -2,7 +2,6 @@ package xkafka
 
 import (
 	"errors"
-	"maps"
 	"strings"
 	"time"
 
@@ -37,31 +36,6 @@ func WithName(name string) Opt {
 
 	return clientOpt{fn: func(c *client) {
 		c.name = name
-	}}
-}
-
-// WithLabel adds or replaces one observability label.
-func WithLabel(key, value string) Opt {
-	return clientOpt{fn: func(c *client) {
-		if key != "" {
-			c.labels[key] = value
-		}
-	}}
-}
-
-// WithLabels merges observability labels into the client metadata.
-//
-// Labels are defensively copied. When the same key is configured more than
-// once, the last value wins.
-func WithLabels(labels map[string]string) Opt {
-	labels = maps.Clone(labels)
-
-	return clientOpt{fn: func(c *client) {
-		for key, value := range labels {
-			if key != "" {
-				c.labels[key] = value
-			}
-		}
 	}}
 }
 

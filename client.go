@@ -53,42 +53,6 @@ func (c *Client) Name() string {
 	return c.cl.Name()
 }
 
-// Label returns one client label without allocating a copy of all labels.
-func (c *Client) Label(key string) (string, bool) {
-	if c == nil || c.cl == nil {
-		return "", false
-	}
-
-	return c.cl.Label(key)
-}
-
-// Labels returns a detached copy of the client labels.
-func (c *Client) Labels() map[string]string {
-	if c == nil || c.cl == nil {
-		return nil
-	}
-
-	return c.cl.Labels()
-}
-
-// ConsumerGroup returns the configured consumer group.
-func (c *Client) ConsumerGroup() string {
-	if c == nil || c.cl == nil {
-		return ""
-	}
-
-	return c.cl.consumerGroup
-}
-
-// ShareGroup returns the configured Share Group.
-func (c *Client) ShareGroup() string {
-	if c == nil || c.cl == nil {
-		return ""
-	}
-
-	return c.cl.shareGroup
-}
-
 func (c *Client) Ping(ctx context.Context) error {
 	if err := c.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping client: %w", err)

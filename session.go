@@ -55,33 +55,6 @@ func (g *GroupTransactSession) Name() string {
 	return g.cl.Name()
 }
 
-// Label returns one session label without allocating a copy of all labels.
-func (g *GroupTransactSession) Label(key string) (string, bool) {
-	if g == nil || g.cl == nil {
-		return "", false
-	}
-
-	return g.cl.Label(key)
-}
-
-// Labels returns a detached copy of the session labels.
-func (g *GroupTransactSession) Labels() map[string]string {
-	if g == nil || g.cl == nil {
-		return nil
-	}
-
-	return g.cl.Labels()
-}
-
-// ConsumerGroup returns the configured consumer group.
-func (g *GroupTransactSession) ConsumerGroup() string {
-	if g == nil || g.cl == nil {
-		return ""
-	}
-
-	return g.cl.consumerGroup
-}
-
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	if err := g.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping group transact session: %w", err)

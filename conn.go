@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,9 +38,8 @@ type client struct {
 	formatter *kgo.RecordFormatter
 	logger    kgo.Logger
 
-	name   string
-	labels map[string]string
-	hooks  hooks
+	name  string
+	hooks hooks
 
 	promiseFunc    PromiseFunc
 	defaultPromise PromiseFunc
@@ -79,7 +77,6 @@ func newClient(opts ...Opt) (*client, error) {
 		pollInterval:             time.Second,
 		suspendProcessingTimeout: 30 * time.Second,
 		suspendCommittingTimeout: 10 * time.Second,
-		labels:                   make(map[string]string),
 		exitCh:                   make(chan struct{}),
 	}
 
@@ -246,23 +243,6 @@ func (c *client) Name() string {
 	}
 
 	return c.name
-}
-
-func (c *client) Label(key string) (string, bool) {
-	if c == nil {
-		return "", false
-	}
-
-	value, ok := c.labels[key]
-	return value, ok
-}
-
-func (c *client) Labels() map[string]string {
-	if c == nil {
-		return nil
-	}
-
-	return maps.Clone(c.labels)
 }
 
 // processFetches processes a single PollRecords result.
