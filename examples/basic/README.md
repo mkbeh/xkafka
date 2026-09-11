@@ -1,14 +1,14 @@
 # Basic Example
 
-This example demonstrates the core `xkafka.Client` produce and consume workflow without external observability integrations.
+This example shows the basic `xkafka.Client` workflow for producing and consuming Kafka records.
 
 **This example demonstrates:**
 
-* creating one client for producing and consuming;
-* explicitly checking broker connectivity with `Ping`;
-* synchronously producing a record;
-* consuming records through a batch handler;
-* graceful client shutdown.
+* Creating a client for both producing and consuming;
+* Checking connectivity to Kafka;
+* Producing records synchronously;
+* Processing consumed records in batches;
+* Handling polling errors and application shutdown gracefully.
 
 ## Local Kafka setup
 
@@ -35,6 +35,8 @@ Redpanda Console is available at:
 ```text
 http://localhost:18080
 ```
+
+The example uses the `sample-topic` topic created by the local Kafka setup.
 
 ## Run
 
@@ -68,14 +70,22 @@ Expected response:
 HTTP 204
 ```
 
-The consumer prints the processed record:
+Example log:
 
 ```text
 consume: topic=sample-topic partition=0 offset=0 key="basic" msg={ID:42 Text:hello from xkafka}
 ```
 
-Partition and offset values depend on the Kafka topic state.
+## Stop services
 
-## Stop
+From the repository root:
 
-Press `Ctrl+C` to stop the HTTP server, polling loop, and Kafka client gracefully.
+```shell
+docker compose -f examples/docker-compose.yml down --remove-orphans -v
+```
+
+Or from this example directory:
+
+```shell
+docker compose -f ../docker-compose.yml down --remove-orphans -v
+```
