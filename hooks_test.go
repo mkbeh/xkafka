@@ -12,6 +12,38 @@ import (
 
 type hookContextKey string
 
+type testProduceContextHook struct {
+	name    string
+	starts  *[]string
+	records *[]string
+	ends    *[]string
+}
+
+func (h *testProduceContextHook) OnProduceStart(
+	ctx context.Context,
+	_ []*kgo.Record,
+) context.Context {
+	*h.starts = append(*h.starts, h.name)
+	return context.WithValue(ctx, hookContextKey(h.name), true)
+}
+
+func (h *testProduceContextHook) OnProduceRecord(ctx context.Context, _ *kgo.Record) {
+	if marked, _ := ctx.Value(hookContextKey(h.name)).(bool); marked {
+		*h.records = append(*h.records, h.name)
+	}
+}
+
+func (h *testProduceContextHook) OnProduceEnd(
+	ctx context.Context,
+	_ []*kgo.Record,
+	_ time.Duration,
+	_ error,
+) {
+	if marked, _ := ctx.Value(hookContextKey(h.name)).(bool); marked {
+		*h.ends = append(*h.ends, h.name)
+	}
+}
+
 type testHandleHook struct {
 	name   string
 	starts *[]string
@@ -171,6 +203,33 @@ func TestHooksKafkaErrorContext(t *testing.T) {
 	}
 	if !errors.Is(hook.fetchErr, fetchErr) {
 		t.Fatalf("fetch error = %v, want %v", hook.fetchErr, fetchErr)
+	}
+}
+
+func TestHooksProduceContext(t *testing.T) {
+	var starts, recordCalls, ends []string
+
+	first := &testProduceContextHook{
+		name: "first", starts: &starts, records: &recordCalls, ends: &ends,
+	}
+	second := &testProduceContextHook{
+		name: "second", starts: &starts, records: &recordCalls, ends: &ends,
+	}
+	hookSet := hooks{first, second}
+
+	records := []*kgo.Record{{Topic: "orders"}}
+	ctx := hookSet.onProduceStart(context.Background(), records)
+	hookSet.onProduceRecord(ctx, records[0])
+	hookSet.onProduceEnd(ctx, records, time.Second, nil)
+
+	if want := []string{"first", "second"}; !reflect.DeepEqual(starts, want) {
+		t.Fatalf("start order = %v, want %v", starts, want)
+	}
+	if want := []string{"first", "second"}; !reflect.DeepEqual(recordCalls, want) {
+		t.Fatalf("record hook order = %v, want %v", recordCalls, want)
+	}
+	if want := []string{"first", "second"}; !reflect.DeepEqual(ends, want) {
+		t.Fatalf("end order = %v, want %v", ends, want)
 	}
 }
 

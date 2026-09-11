@@ -100,9 +100,6 @@ client, err := xkafka.NewClient(
 through the produced records. If the supplied context contains an active span,
 the `send` span continues that trace.
 
-`Produce` and `TryProduce` propagate trace context without creating `send`
-spans.
-
 Here's an example of how you might do this:
 
 <!-- @formatter:off -->

@@ -121,7 +121,7 @@ func WithSuspendProcessingTimeout(timeout time.Duration) Opt {
 	}}
 }
 
-// WithSuspendCommittingTimeout sets the wait time after offset commit or ack errors.
+// WithSuspendCommittingTimeout sets the wait time between offset commit retries.
 func WithSuspendCommittingTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if timeout >= 0 {
@@ -141,7 +141,7 @@ func WithShareRejectAfterDeliveries(deliveries int32) Opt {
 	}}
 }
 
-// WithShareReleaseTimeout delays AckRelease after Share Group handler errors.
+// WithShareReleaseTimeout delays flushing AckRelease acknowledgements after Share Group handler errors.
 func WithShareReleaseTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if timeout >= 0 {
