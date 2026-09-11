@@ -1,4 +1,4 @@
-package xkafka
+package xkafka_test
 
 import (
 	"context"
@@ -223,16 +223,7 @@ func TestGroupTransactSessionCommit(t *testing.T) {
 		t.Fatalf("transaction end error = %v, want nil", event.err)
 	}
 
-	waitTestCondition(t, "transactional input offset commit", func() bool {
-		offsets := session.cl.Client().CommittedOffsets()
-		partitions, ok := offsets[inputTopic]
-		if !ok {
-			return false
-		}
-
-		offset, ok := partitions[0]
-		return ok && offset.Offset == recordCount
-	})
+	waitTestCommittedOffset(t, cluster, group, inputTopic, recordCount)
 
 	cancel()
 	if err := waitTestGroupTransactSession(t, errCh); !errors.Is(err, context.Canceled) {
@@ -397,16 +388,7 @@ func TestGroupTransactSessionAbortAndRedelivery(t *testing.T) {
 				t.Fatalf("second transaction error = %v, want nil", second.err)
 			}
 
-			waitTestCondition(t, "transactional input offset commit", func() bool {
-				offsets := session.cl.Client().CommittedOffsets()
-				partitions, ok := offsets[inputTopic]
-				if !ok {
-					return false
-				}
-
-				offset, ok := partitions[0]
-				return ok && offset.Offset == 1
-			})
+			waitTestCommittedOffset(t, cluster, group, inputTopic, 1)
 
 			cancel()
 			if err := waitTestGroupTransactSession(t, errCh); !errors.Is(err, context.Canceled) {
@@ -791,8 +773,13 @@ func TestGroupTransactSessionShutdownStopsFetchLoop(t *testing.T) {
 		}),
 	)
 
-	errCh := runTestGroupTransactSession(context.Background(), session)
-	waitTestCondition(t, "group transaction polling loop start", session.cl.polling.Load)
+	started := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() {
+		close(started)
+		errCh <- session.HandleFetches(context.Background())
+	}()
+	waitTestSignal(t, started, "group transaction fetch loop start")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()

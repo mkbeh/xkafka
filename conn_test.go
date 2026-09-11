@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -168,5 +169,122 @@ func TestHandleFetchErrorsRecoverableOnly(t *testing.T) {
 		if !event.recoverable {
 			t.Fatalf("fetch error hook event %d recoverable = false, want true", i)
 		}
+	}
+}
+
+func TestHandleFetchesLifecycle(t *testing.T) {
+	t.Run("nil connection", func(t *testing.T) {
+		cl := &client{}
+		err := cl.HandleFetches(context.Background())
+		if err == nil || err.Error() != "kafka: conn is nil" {
+			t.Fatalf("handle fetches error = %v, want nil connection error", err)
+		}
+	})
+
+	t.Run("nil handler", func(t *testing.T) {
+		cl := &client{conn: &testClientConn{}}
+		err := cl.HandleFetches(context.Background())
+		if err == nil || err.Error() != "kafka: fetches handler is nil" {
+			t.Fatalf("handle fetches error = %v, want nil handler error", err)
+		}
+	})
+
+	t.Run("single polling loop", func(t *testing.T) {
+		cl := &client{
+			conn:          &testClientConn{},
+			handleFetches: func(context.Context, kgo.Fetches) error { return nil },
+			pollInterval:  time.Hour,
+			exitCh:        make(chan struct{}),
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() { errCh <- cl.HandleFetches(ctx) }()
+
+		waitTestCondition(t, "polling loop start", cl.polling.Load)
+
+		err := cl.HandleFetches(context.Background())
+		if err == nil || err.Error() != "kafka: fetch loop already running" {
+			t.Fatalf("second handle fetches error = %v, want already running", err)
+		}
+
+		cancel()
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("first handle fetches error = %v, want %v", err, context.Canceled)
+			}
+		case <-time.After(testTimeout):
+			t.Fatal("timed out waiting for first polling loop")
+		}
+
+		canceled, cancelAgain := context.WithCancel(context.Background())
+		cancelAgain()
+		if err := cl.HandleFetches(canceled); !errors.Is(err, context.Canceled) {
+			t.Fatalf("handle fetches after polling reset = %v, want %v", err, context.Canceled)
+		}
+	})
+}
+
+func TestClientProcessFetchesAllowRebalance(t *testing.T) {
+	handleErr := errors.New("handle failed")
+
+	tests := []struct {
+		name                string
+		blockRebalance      bool
+		cancelContext       bool
+		wantErr             error
+		wantAllowRebalances int
+	}{
+		{
+			name:                "disabled",
+			wantErr:             handleErr,
+			wantAllowRebalances: 0,
+		},
+		{
+			name:                "enabled after handler error",
+			blockRebalance:      true,
+			wantErr:             handleErr,
+			wantAllowRebalances: 1,
+		},
+		{
+			name:                "enabled after context cancellation",
+			blockRebalance:      true,
+			cancelContext:       true,
+			wantErr:             context.Canceled,
+			wantAllowRebalances: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &testClientConn{}
+			runtime := &client{
+				conn:           conn,
+				blockRebalance: tt.blockRebalance,
+				handleFetches: func(context.Context, kgo.Fetches) error {
+					return handleErr
+				},
+			}
+
+			ctx := context.Background()
+			if tt.cancelContext {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := runtime.processFetches(ctx, nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("process fetches error = %v, want %v", err, tt.wantErr)
+			}
+			if conn.allowRebalanceCalls != tt.wantAllowRebalances {
+				t.Fatalf(
+					"allow rebalance calls = %d, want %d",
+					conn.allowRebalanceCalls,
+					tt.wantAllowRebalances,
+				)
+			}
+		})
 	}
 }

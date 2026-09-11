@@ -1,4 +1,4 @@
-package xkafka
+package xkafka_test
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -401,62 +400,5 @@ func TestClientRunInTxNilFunc(t *testing.T) {
 	}
 	if len(state.endEvents) != 0 {
 		t.Fatalf("transaction end calls = %d, want 0", len(state.endEvents))
-	}
-}
-
-func TestShouldAbortAfterCommit(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "operation not attempted",
-			err:  kerr.OperationNotAttempted,
-			want: true,
-		},
-		{
-			name: "wrapped operation not attempted",
-			err:  fmt.Errorf("wrapped: %w", kerr.OperationNotAttempted),
-			want: true,
-		},
-		{
-			name: "transaction abortable",
-			err:  kerr.TransactionAbortable,
-			want: true,
-		},
-		{
-			name: "unknown server error",
-			err:  kerr.UnknownServerError,
-			want: true,
-		},
-		{
-			name: "client closed",
-			err:  kgo.ErrClientClosed,
-			want: false,
-		},
-		{
-			name: "wrapped client closed",
-			err:  fmt.Errorf("wrapped: %w", kgo.ErrClientClosed),
-			want: false,
-		},
-		{
-			name: "other Kafka error",
-			err:  kerr.UnknownTopicOrPartition,
-			want: false,
-		},
-		{
-			name: "transport error",
-			err:  errors.New("transport failed"),
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldAbortAfterCommit(tt.err); got != tt.want {
-				t.Fatalf("shouldAbortAfterCommit(%v) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
 	}
 }

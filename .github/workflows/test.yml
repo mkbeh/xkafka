@@ -37,6 +37,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             extra/**/go.sum
+            tests/go.sum
             examples/**/go.sum
 
       - name: Set up Task
@@ -80,6 +81,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             extra/**/go.sum
+            tests/go.sum
             examples/**/go.sum
 
       - name: Set up Task

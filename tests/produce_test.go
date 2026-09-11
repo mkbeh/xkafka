@@ -1,4 +1,4 @@
-package xkafka
+package xkafka_test
 
 import (
 	"bytes"

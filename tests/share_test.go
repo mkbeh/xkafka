@@ -1,4 +1,4 @@
-package xkafka
+package xkafka_test
 
 import (
 	"context"
@@ -412,6 +412,10 @@ func TestClientShareGroupReleaseTimeout(t *testing.T) {
 
 	cluster := newTestKafkaCluster(t, topic)
 	hook := newTestShareRuntimeHook()
+	var (
+		handledAt   time.Time
+		handledOnce sync.Once
+	)
 
 	client := newTestClient(
 		t,
@@ -423,44 +427,39 @@ func TestClientShareGroupReleaseTimeout(t *testing.T) {
 		),
 		WithHooks(hook),
 		WithShareReleaseTimeout(releaseTimeout),
+		WithPollInterval(testPollInterval),
 		WithBatchHandler(func(_ context.Context, _ []*kgo.Record) error {
-			return nil
+			handledOnce.Do(func() { handledAt = time.Now() })
+			return errors.New("handle failed")
 		}),
 	)
 
 	establishTestShareGroup(t, client)
 	produceTestRecords(t, cluster, topic, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := runTestHandleFetches(ctx, client)
 
-	fetches := client.cl.Client().PollRecords(ctx, 1)
-	if err := fetches.Err(); err != nil {
-		t.Fatalf("poll share record: %v", err)
+	waitTestSignal(t, hook.flushCh, "share release flush")
+	cancel()
+	if err := waitTestHandleFetches(t, errCh); !errors.Is(err, context.Canceled) {
+		t.Fatalf("handle fetches error = %v, want %v", err, context.Canceled)
 	}
-
-	records := fetches.Records()
-	if len(records) != 1 {
-		t.Fatalf("share records = %d, want 1", len(records))
-	}
-
-	startedAt := time.Now()
-	client.ackRecords(context.Background(), records, kgo.AckRelease)
 
 	acks, flushCalls, flushErrs, flushTimes := hook.snapshot()
-	if want := []testShareAckEvent{{outcome: ShareAckRelease, count: 1}}; !reflect.DeepEqual(acks, want) {
-		t.Fatalf("share ack events = %#v, want %#v", acks, want)
+	if len(acks) == 0 || acks[0] != (testShareAckEvent{outcome: ShareAckRelease, count: 1}) {
+		t.Fatalf("first share ack event = %#v, want release", acks)
 	}
-	if flushCalls != 1 {
-		t.Fatalf("share ack flush calls = %d, want 1", flushCalls)
+	if flushCalls < 1 {
+		t.Fatalf("share ack flush calls = %d, want at least 1", flushCalls)
 	}
-	if len(flushErrs) != 1 || flushErrs[0] != nil {
-		t.Fatalf("share ack flush errors = %v, want [<nil>]", flushErrs)
+	if len(flushErrs) == 0 || flushErrs[0] != nil {
+		t.Fatalf("first share ack flush error = %v, want nil", flushErrs)
 	}
-	if len(flushTimes) != 1 {
-		t.Fatalf("share ack flush times = %d, want 1", len(flushTimes))
+	if len(flushTimes) == 0 {
+		t.Fatal("share ack flush times is empty")
 	}
-	if elapsed := flushTimes[0].Sub(startedAt); elapsed < releaseTimeout {
+	if elapsed := flushTimes[0].Sub(handledAt); elapsed < releaseTimeout {
 		t.Fatalf("share release delay = %s, want at least %s", elapsed, releaseTimeout)
 	}
 }

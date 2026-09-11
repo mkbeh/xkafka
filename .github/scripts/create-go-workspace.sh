@@ -30,7 +30,7 @@ modules=(.)
 
 while IFS= read -r -d '' mod; do
     modules+=("$(dirname "${mod}")")
-done < <(find ./extra -name go.mod -type f -print0 2>/dev/null | sort -z)
+done < <(find ./extra ./tests -name go.mod -type f -print0 2>/dev/null | sort -z)
 
 if [[ "${include_examples}" == "true" ]]; then
     while IFS= read -r -d '' mod; do
@@ -68,7 +68,7 @@ done < <(
     {
         printf '%s\0' ./go.mod
 
-        find ./extra ./examples \
+        find ./extra ./examples ./tests \
             -name go.mod -type f -print0 2>/dev/null || true
     } |
         while IFS= read -r -d '' mod; do

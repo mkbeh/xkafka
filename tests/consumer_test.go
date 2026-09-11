@@ -1,4 +1,4 @@
-package xkafka
+package xkafka_test
 
 import (
 	"context"
@@ -349,9 +349,10 @@ func TestClientBatchConsumerCommitModes(t *testing.T) {
 				processedCount int
 			)
 
+			group := "xkafka-test-" + strings.ReplaceAll(tt.name, " ", "-")
 			kafkaOpts := []kgo.Opt{
 				kgo.ConsumeTopics(topic),
-				kgo.ConsumerGroup("xkafka-test-" + strings.ReplaceAll(tt.name, " ", "-")),
+				kgo.ConsumerGroup(group),
 			}
 			kafkaOpts = append(kafkaOpts, tt.groupOpts...)
 
@@ -374,83 +375,11 @@ func TestClientBatchConsumerCommitModes(t *testing.T) {
 			errCh := runTestHandleFetches(ctx, client)
 
 			waitTestSignal(t, processed, "consumer batch")
-			waitTestCondition(t, "committed offset", func() bool {
-				offsets := client.cl.Client().CommittedOffsets()
-				partitions, ok := offsets[topic]
-				if !ok {
-					return false
-				}
-
-				offset, ok := partitions[0]
-				return ok && offset.Offset == recordCount
-			})
+			waitTestCommittedOffset(t, cluster, group, topic, recordCount)
 
 			cancel()
 			if err := waitTestHandleFetches(t, errCh); !errors.Is(err, context.Canceled) {
 				t.Fatalf("handle fetches error = %v, want %v", err, context.Canceled)
-			}
-		})
-	}
-}
-
-func TestClientProcessFetchesAllowRebalance(t *testing.T) {
-	handleErr := errors.New("handle failed")
-
-	tests := []struct {
-		name                string
-		blockRebalance      bool
-		cancelContext       bool
-		wantErr             error
-		wantAllowRebalances int
-	}{
-		{
-			name:                "disabled",
-			wantErr:             handleErr,
-			wantAllowRebalances: 0,
-		},
-		{
-			name:                "enabled after handler error",
-			blockRebalance:      true,
-			wantErr:             handleErr,
-			wantAllowRebalances: 1,
-		},
-		{
-			name:                "enabled after context cancellation",
-			blockRebalance:      true,
-			cancelContext:       true,
-			wantErr:             context.Canceled,
-			wantAllowRebalances: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			conn := &testClientConn{}
-			runtime := &client{
-				conn:           conn,
-				blockRebalance: tt.blockRebalance,
-				handleFetches: func(context.Context, kgo.Fetches) error {
-					return handleErr
-				},
-			}
-
-			ctx := context.Background()
-			if tt.cancelContext {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithCancel(ctx)
-				cancel()
-			}
-
-			err := runtime.processFetches(ctx, nil)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("process fetches error = %v, want %v", err, tt.wantErr)
-			}
-			if conn.allowRebalanceCalls != tt.wantAllowRebalances {
-				t.Fatalf(
-					"allow rebalance calls = %d, want %d",
-					conn.allowRebalanceCalls,
-					tt.wantAllowRebalances,
-				)
 			}
 		})
 	}
@@ -540,16 +469,7 @@ func TestClientCommitOffsetsRetries(t *testing.T) {
 		t.Fatalf("second offset commit error = %v, want nil", second.err)
 	}
 
-	waitTestCondition(t, "committed offset after retry", func() bool {
-		offsets := client.cl.Client().CommittedOffsets()
-		partitions, ok := offsets[topic]
-		if !ok {
-			return false
-		}
-
-		offset, ok := partitions[0]
-		return ok && offset.Offset == 1
-	})
+	waitTestCommittedOffset(t, cluster, group, topic, 1)
 
 	cancel()
 	if err := waitTestHandleFetches(t, errCh); !errors.Is(err, context.Canceled) {

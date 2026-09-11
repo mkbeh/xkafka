@@ -18,14 +18,15 @@ vars:
     sh: |
       {
         printf '.\n'
-        find ./extra ./examples -name go.mod -type f -print 2>/dev/null |
+        find ./extra ./examples ./tests -name go.mod -type f -print 2>/dev/null |
           while IFS= read -r mod; do
             dirname "$mod"
           done
       } | sort -u
 
-  # Coverage is aggregated for production modules only. Example modules are
-  # still linted and tested, but do not affect the library coverage metric.
+  # Coverage is aggregated for production modules only. Example and behavioral
+  # test modules are still linted and tested; behavioral tests also contribute
+  # coverage to the root xkafka module.
   COVERAGE_MODULE_DIRS:
     sh: |
       {
@@ -94,14 +95,57 @@ tasks:
 
         printf 'mode: atomic\n' > "$output"
 
-        profile_index=0
-
         for module in {{.COVERAGE_MODULE_DIRS}}; do
           echo "==> $module"
 
-          profile="$profiles/$profile_index.out"
-          profile_index=$((profile_index + 1))
+          if [ "$module" = "." ]; then
+            root_profile="$profiles/root.out"
+            behavior_profile="$profiles/behavior.out"
+            merged_profile="$profiles/root-merged.out"
 
+            (
+              cd "$root"
+              GOWORK="$root/go.work" go test \
+                -mod=readonly \
+                -count=1 \
+                -covermode=atomic \
+                -coverpkg=github.com/mkbeh/xkafka \
+                -coverprofile="$root_profile" \
+                ./...
+            )
+
+            (
+              cd "$root/tests"
+              GOWORK="$root/go.work" go test \
+                -mod=readonly \
+                -count=1 \
+                -covermode=atomic \
+                -coverpkg=github.com/mkbeh/xkafka \
+                -coverprofile="$behavior_profile" \
+                ./...
+            )
+
+            {
+              printf 'mode: atomic\n'
+              awk '
+                FNR == 1 { next }
+                {
+                  key = $1 " " $2
+                  counts[key] += $3
+                }
+                END {
+                  for (key in counts) {
+                    print key, counts[key]
+                  }
+                }
+              ' "$root_profile" "$behavior_profile" | sort
+            } > "$merged_profile"
+
+            tail -n +2 "$merged_profile" >> "$output"
+            continue
+          fi
+
+          profile="$profiles/$(printf '%s' "$module" | tr '/.' '__').out"
           (
             cd "$root/$module"
             GOWORK="$root/go.work" go test \
