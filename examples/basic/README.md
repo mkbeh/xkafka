@@ -60,17 +60,21 @@ http://localhost:8080
 
 ## Produce a record
 
+Send a `POST` request to publish a record:
+
 ```shell
 curl -i -X POST 'http://localhost:8080/produce'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 204
+```http
+HTTP/1.1 204 No Content
 ```
 
-Example log:
+### Example log
+
+The consumer receives the record and logs:
 
 ```text
 consume: topic=sample-topic key="basic" msg={ID:42 Text:hello from xkafka}

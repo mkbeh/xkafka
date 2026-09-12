@@ -60,7 +60,7 @@ http://localhost:8080
 
 ## Commit a transaction
 
-`POST /tx` publishes the record and commits the transaction.
+The `POST /tx` endpoint publishes a record and commits it in a Kafka transaction.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/tx' \
@@ -68,23 +68,27 @@ curl -i -X POST 'http://localhost:8080/tx' \
   -d '{"id":100}'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 202
+```http
+HTTP/1.1 202 Accepted
+
 transaction committed
 ```
 
-Example log:
+### Example log
+
+Once the transaction is committed, the downstream consumer reads the committed record:
 
 ```text
 consume committed transaction: topic=sample-tx-topic key="100" msg={ID:100}
 ```
 
-## Abort on error
+## Abort a transaction on error
 
-`POST /tx-error` produces a record and then returns an error from the transaction callback.
-The transaction is aborted, so the record is not visible to the read-committed consumer.
+The `POST /tx-error` endpoint publishes a record inside a Kafka transaction and then returns an error from the
+transaction callback. The transaction is automatically aborted, so the record is not visible to `read_committed`
+consumers.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/tx-error' \
@@ -92,20 +96,22 @@ curl -i -X POST 'http://localhost:8080/tx-error' \
   -d '{"id":300}'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 500
+```http
+HTTP/1.1 500 Internal Server Error
+
 forced transaction error
 ```
 
-No record with key `300` should appear in the consumer log.
+> **Verification:** Because the transaction was aborted, no record with key `"300"` appears in the downstream consumer
+> logs.
 
-## Abort on panic
+## Abort a transaction on panic
 
-`POST /tx-panic` produces a record and then panics inside the transaction callback.
-The transaction is aborted before the panic is re-thrown. The HTTP handler recovers
-the panic only so the example server can return a response and keep running.
+The `POST /tx-panic` endpoint publishes a record inside a Kafka transaction and then panics from the transaction
+callback. The transaction is automatically aborted before the panic is re-thrown. The HTTP handler recovers from the
+panic to return an error response and keep the example application running.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/tx-panic' \
@@ -113,14 +119,16 @@ curl -i -X POST 'http://localhost:8080/tx-panic' \
   -d '{"id":400}'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 500
+```http
+HTTP/1.1 500 Internal Server Error
+
 transaction panic: forced transaction panic
 ```
 
-No record with key `400` should appear in the consumer log.
+> **Verification:** Because the transaction was aborted, no record with key `"400"` appears in the downstream consumer
+> logs.
 
 ## Stop services
 

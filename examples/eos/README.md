@@ -59,12 +59,11 @@ The HTTP server listens on:
 http://localhost:8080
 ```
 
-## Process records exactly once
+## Process records exactly once (EOS)
 
-`POST /eos` publishes five input records starting at the supplied ID. Each consumed
-batch is transformed and produced to the output topic in a Kafka transaction.
-The produced records and consumed input offsets for that batch are committed
-atomically.
+The `POST /eos` endpoint publishes 5 input records starting from the provided ID. Each consumed batch is transformed
+and written to the output topic within a Kafka transaction. The produced records and corresponding consumed offsets are
+committed atomically.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/eos' \
@@ -72,14 +71,17 @@ curl -i -X POST 'http://localhost:8080/eos' \
   -d '{"id":100}'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 202
+```http
+HTTP/1.1 202 Accepted
+
 published 5 EOS input records
 ```
 
-Example log:
+### Example log
+
+The logs show records being processed from the input topic and the committed results appearing on the output topic:
 
 ```text
   input: topic=sample-eos-input-topic key="100" id=100 attempt=1
@@ -90,25 +92,25 @@ eos output: topic=sample-eos-output-topic key="100" msg={ID:100 Source:sample-eo
 
 ## Abort and retry on handler error
 
-`POST /eos-error` publishes input record `888`. The first processing attempt
-produces an output record inside the transaction and then intentionally returns
-an error.
+The `POST /eos-error` endpoint publishes a single input record with ID `888`. During the first processing attempt, the
+handler produces an output record inside the transaction and then intentionally returns an error.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/eos-error'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 202
+```http
+HTTP/1.1 202 Accepted
+
 published EOS input record id=888
 ```
 
-The first transaction is aborted, so its output record and consumed offset are
-not committed. The input record is redelivered and the second attempt succeeds.
+### Example log
 
-Example log:
+Because the first attempt fails, `xkafka` automatically aborts the transaction, so neither the output record nor the
+consumed offset is committed. The input record is then redelivered and the second processing attempt succeeds:
 
 ```text
 eos process: records=1
@@ -119,31 +121,42 @@ eos output: topic=sample-eos-output-topic key="888" msg={ID:888 Source:sample-eo
 ...
 ```
 
-There is no output with `Attempt:1` because that record belonged to the aborted
-transaction.
+> **Verification:** No output with `Attempt:1` appears because the first transaction was aborted and its output record
+> is not visible to the `read_committed` output consumer.
 
 ## Abort and retry on handler panic
 
-`POST /eos-panic` publishes input record `444`. The first processing attempt
-panics after producing its transactional output record.
+The `POST /eos-panic` endpoint publishes a single input record with ID `444`. During the first processing attempt, the
+handler produces an output record inside the transaction and then intentionally panics.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/eos-panic'
 ```
 
-Expected response:
+### Expected response
 
-```text
-HTTP 202
+```http
+HTTP/1.1 202 Accepted
+
 published EOS input record id=444
 ```
 
-The transaction is aborted and the input record is redelivered. The second
-attempt succeeds, so the output consumer sees only the committed retry:
+### Example log
+
+`xkafka` automatically recovers from the handler panic and aborts the transaction, so neither the output record nor the
+consumed offset is committed. The input record is then redelivered and the second processing attempt succeeds:
 
 ```text
+eos process: records=1
+  input: topic=sample-eos-input-topic key="444" id=444 attempt=1
+eos process: records=1
+  input: topic=sample-eos-input-topic key="444" id=444 attempt=2
 eos output: topic=sample-eos-output-topic key="444" msg={ID:444 Source:sample-eos-input-topic Attempt:2}
+...
 ```
+
+> **Verification:** No output with `Attempt:1` appears because the first transaction was aborted and its output record
+> is not visible to the `read_committed` output consumer.
 
 ## Stop services
 
