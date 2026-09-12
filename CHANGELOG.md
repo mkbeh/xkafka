@@ -1,29 +1,46 @@
 # Changelog
 
-## v0.5.1
+All notable changes to this project will be documented in this file.
 
-Initial maintained release of `xkafka`.
+## v0.6.0
+
+Initial production release of `xkafka`, introducing a compact runtime layer built directly on top of `franz-go`.
 
 ### Added
 
-* Unified **Kafka client** for producing and consuming.
-* **Synchronous and asynchronous** producing modes.
-* **Batch consumer** handlers with safe offset commits.
-* Transactional producing via **`RunInTx`**.
-* **`GroupTransactSession`** for Kafka-to-Kafka exactly-once semantics (EOS).
-* Atomic commits of produced records and consumed offsets within a single transaction.
-* Automatic transaction abort on handler errors or panics.
-* **Share Group** consumption support with `AckAccept`, `AckRelease`, and `AckReject` behaviors.
-* **TLS and SASL** configuration support.
-* **OpenTelemetry** hooks for Kafka client metrics and tracing.
-* **OpenTelemetry tracing** with backend-agnostic `TracerProvider` and `TextMapPropagator`.
-* **Prometheus** wrapper-level metrics.
-* Shared **`Config`** structure for producer, consumer, Share Group, and transaction workflows.
-* Environment variable tags for **`Config`**.
-* Runnable examples for producing, consuming, transactions, EOS, Share Groups, and env-based configuration.
-* README documentation for core features, configuration, metrics, and examples.
+* **Unified Kafka Client:** Single `Client` instance for synchronous, asynchronous, non-blocking, and transactional
+  producing alongside handler-driven consumption.
+* **Native franz-go Configuration:** Direct support for native `kgo.Opt` values without introducing a parallel
+  configuration layer.
+* **Batch Processing:** Unified batch handler model for regular consumer groups and Kafka Share Groups, with
+  configurable retries, backoff, and panic recovery.
+* **Kafka Share Groups (KIP-932):** Record-level accept, release, broker redelivery, delivery-count based rejection,
+  configurable release delays, and acknowledgement flushing.
+* **Producer Transactions:** Managed transactional workflows through `RunInTx` with automatic commit and abort handling,
+  panic recovery, buffered-record cleanup, and lifecycle hooks.
+* **Exactly-Once Semantics (EOS):** `GroupTransactSession` for Kafka-to-Kafka consume-process-produce workflows with
+  atomic commits of produced records and consumed offsets.
+* **Runtime Hooks:** Composable hooks for client lifecycle, producing, fetching, processing, offset commits, Share Group
+  acknowledgements, and transactions.
+* **Runnable Examples:** Examples covering basic workflows, transactions, Share Groups, exactly-once semantics, and
+  OpenTelemetry instrumentation.
 
-### Notes
+---
 
-* **`GroupTransactSession`** is designed for consume-process-produce loops requiring atomic commits of records and
-  offsets.
+## extra/otelxkafka/v0.6.0
+
+Initial release of the `otelxkafka` OpenTelemetry integration module.
+
+### Added
+
+* **Runtime Metrics:** OpenTelemetry counters and histograms for produce and fetch errors, handler processing, offset
+  commits, Share Group acknowledgements, and transactions.
+* **Distributed Tracing:** OpenTelemetry spans for synchronous producing, consumer batch processing, offset commits,
+  Share Group acknowledgement flushes, and transactions.
+* **Context Propagation:** Context injection and extraction through Kafka record headers, with consumer processing spans
+  linked to propagated message creation contexts using OpenTelemetry span links.
+* **Telemetry Attributes:** Configurable client IDs, consumer groups, Share Groups, and custom labels shared across
+  metrics and traces.
+* **Kotel:** Composition of meter and tracer instrumentation into standard `xkafka` runtime hooks.
+* **franz-go Interoperability:** Support for using `otelxkafka` alongside `franz-go/plugin/kotel` when native franz-go
+  client metrics are required.
