@@ -2,7 +2,9 @@ package otelxkafka
 
 import "maps"
 
-// ClientOpt configures client attributes shared by Meter and Tracer.
+// ClientOpt configures OpenTelemetry attributes shared by Meter and Tracer.
+//
+// Client options can be passed to both [NewMeter] and [NewTracer].
 type ClientOpt interface {
 	MeterOpt
 	TracerOpt
@@ -25,14 +27,20 @@ func (o clientOptFunc) applyTracer(cfg *tracerConfig) {
 	o(&cfg.client)
 }
 
-// ClientID configures the messaging client ID attribute.
+// ClientID sets the messaging client ID attribute.
+//
+// An empty value omits the attribute.
 func ClientID(clientID string) ClientOpt {
 	return clientOptFunc(func(cfg *clientConfig) {
 		cfg.clientID = clientID
 	})
 }
 
-// ConsumerGroup configures the messaging consumer group attribute.
+// ConsumerGroup sets the messaging consumer group attribute.
+//
+// Configuring ConsumerGroup clears any Share Group. An empty value omits the
+// consumer group attribute. If [ConsumerGroup] and [ShareGroup] are both used,
+// the option applied last takes precedence.
 func ConsumerGroup(group string) ClientOpt {
 	return clientOptFunc(func(cfg *clientConfig) {
 		cfg.consumerGroup = group
@@ -40,7 +48,11 @@ func ConsumerGroup(group string) ClientOpt {
 	})
 }
 
-// ShareGroup configures the xkafka Share Group attribute.
+// ShareGroup sets the xkafka Share Group attribute.
+//
+// Configuring ShareGroup clears any consumer group. An empty value omits the
+// Share Group attribute. If [ConsumerGroup] and [ShareGroup] are both used, the
+// option applied last takes precedence.
 func ShareGroup(group string) ClientOpt {
 	return clientOptFunc(func(cfg *clientConfig) {
 		cfg.shareGroup = group
@@ -48,8 +60,10 @@ func ShareGroup(group string) ClientOpt {
 	})
 }
 
-// Labels configures custom OpenTelemetry attributes.
-// Repeated calls merge labels, with later values replacing duplicate keys.
+// Labels adds custom OpenTelemetry attributes shared by Meter and Tracer.
+//
+// The provided map is copied when Labels is called. Repeated calls merge
+// attributes, with later values replacing duplicate keys.
 func Labels(labels map[string]string) ClientOpt {
 	values := maps.Clone(labels)
 

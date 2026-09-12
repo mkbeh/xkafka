@@ -9,15 +9,22 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// GroupTransactSession consumes records and produces records in the same Kafka transaction.
+// GroupTransactSession provides transactional Kafka consume-process-produce
+// operations.
 //
-// It is intended for Kafka-to-Kafka consume-process-produce flows where consumed
-// offsets and produced records must be committed atomically.
+// Each batch processed by [GroupTransactSession.HandleFetches] runs inside a
+// group transaction so produced records and consumed offsets can be committed
+// atomically.
 type GroupTransactSession struct {
 	cl *client
 }
 
-// NewGroupTransactSession creates a Kafka group transaction session.
+// NewGroupTransactSession creates a GroupTransactSession configured with opts.
+//
+// A batch transaction handler configured with
+// [WithGroupTransactSessionBatchHandler] is required. Kafka-to-Kafka EOS also
+// requires a consumer group and transactional ID configured through
+// [WithKafkaOptions].
 func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	cl, err := newClient(opts...)
 	if err != nil {
@@ -46,7 +53,9 @@ func NewGroupTransactSession(opts ...Opt) (*GroupTransactSession, error) {
 	return g, nil
 }
 
-// Name returns the logical session name configured with WithName.
+// Name returns the logical session name configured with [WithName].
+//
+// It returns an empty string if no name was configured.
 func (g *GroupTransactSession) Name() string {
 	if g == nil || g.cl == nil {
 		return ""
@@ -55,6 +64,7 @@ func (g *GroupTransactSession) Name() string {
 	return g.cl.Name()
 }
 
+// Ping verifies that at least one Kafka broker is reachable.
 func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	if err := g.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping group transact session: %w", err)
@@ -63,23 +73,49 @@ func (g *GroupTransactSession) Ping(ctx context.Context) error {
 	return nil
 }
 
+// Produce enqueues record for asynchronous delivery using the session producer.
+//
+// Delivery and backpressure semantics are the same as [Client.Produce].
 func (g *GroupTransactSession) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.Produce(ctx, record, promise)
 }
 
+// TryProduce attempts to enqueue record without waiting for producer buffer
+// space.
+//
+// Delivery semantics are the same as [Client.TryProduce].
 func (g *GroupTransactSession) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	g.cl.TryProduce(ctx, record, promise)
 }
 
+// ProduceSync produces records and waits for all of them to complete.
+//
+// Error semantics are the same as [Client.ProduceSync].
 func (g *GroupTransactSession) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
 	return g.cl.ProduceSync(ctx, records...)
 }
 
+// HandleFetches polls Kafka and processes each fetched batch inside a group
+// transaction.
+//
+// If the handler succeeds, the session attempts to commit produced records and
+// consumed offsets atomically. If the handler returns an error or panics, the
+// session attempts to abort the transaction and waits for the configured
+// suspension delay before continuing.
+//
+// Transaction begin or end errors terminate the fetch loop.
+//
+// HandleFetches runs until ctx is canceled, the session is shut down, or
+// processing returns a terminal error. Only one HandleFetches call may run at
+// a time.
 func (g *GroupTransactSession) HandleFetches(ctx context.Context) error {
 	return g.cl.HandleFetches(ctx)
 }
 
-// Shutdown stops polling and closes the group transaction session.
+// Shutdown stops polling and closes the underlying group transaction session.
+//
+// Shutdown is idempotent and safe to call concurrently. Only the first call
+// performs shutdown.
 func (g *GroupTransactSession) Shutdown(_ context.Context) error {
 	if g == nil || g.cl == nil {
 		return nil
@@ -142,13 +178,16 @@ func (g *GroupTransactSession) handleFetchesBatch(handler BatchTxHandlerFunc) ha
 				)
 			}
 
-			// Begin and End errors indicate transaction-level failures.
-			// Stop the fetch loop rather than starting another transaction on the same session.
+			// Begin and End errors indicate transaction-level failures. Stop the
+			// fetch loop rather than starting another transaction on the same
+			// session.
 			if txErr != nil {
 				return err
 			}
 
+			// Back off after handler failures to avoid a tight redelivery loop.
 			g.cl.wait(ctx, g.cl.suspendProcessingTimeout)
+
 			return nil
 		}
 
@@ -171,6 +210,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 	startTime := time.Now()
 
 	defer func() {
+		// A completed transaction that did not commit is reported as an abort.
 		outcome := TransactionOutcomeAbort
 		switch {
 		case txErr != nil:
@@ -179,6 +219,7 @@ func (g *GroupTransactSession) handleRecordsInTx(
 			outcome = TransactionOutcomeCommit
 		}
 
+		// Prefer a transaction error over the handler error for transaction hooks.
 		hookErr := txErr
 		if hookErr == nil {
 			hookErr = handleErr
@@ -227,6 +268,8 @@ func (g *GroupTransactSession) handleRecords(
 
 	defer func() {
 		if r := recover(); r != nil {
+			// Convert handler panics into handler errors so the transaction
+			// follows the normal abort path.
 			err = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 

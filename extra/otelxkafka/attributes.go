@@ -60,7 +60,7 @@ func newAttributeSets(
 	return clientAttrs, normalizeAttributes(consumerAttrs...)
 }
 
-// normalizeAttributes returns normalized attributes with no spare slice capacity.
+// normalizeAttributes returns a normalized attribute slice with no spare capacity.
 func normalizeAttributes(attrs ...attribute.KeyValue) []attribute.KeyValue {
 	set := attribute.NewSet(attrs...)
 	return slices.Clip(set.ToSlice())

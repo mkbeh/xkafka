@@ -12,7 +12,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// clientConn is the minimal Kafka client interface shared by Client and GroupTransactSession.
+// clientConn defines the Kafka operations shared by Client and
+// GroupTransactSession.
 type clientConn interface {
 	Produce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
 	TryProduce(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
@@ -27,10 +28,10 @@ var (
 	_ clientConn = (*kgo.GroupTransactSession)(nil)
 )
 
-// handleFetchesFunc adapts fetched Kafka records to a configured processing strategy.
 type handleFetchesFunc func(ctx context.Context, fetches kgo.Fetches) error
 
-// client contains the shared runtime state used by Client and GroupTransactSession.
+// client contains the shared runtime state backing Client and
+// GroupTransactSession.
 type client struct {
 	conn      clientConn
 	kafkaOpts []kgo.Opt
@@ -84,6 +85,7 @@ func newClient(opts ...Opt) (*client, error) {
 		opt.apply(c)
 	}
 
+	// Apply the xkafka name last so it takes precedence over a native client ID.
 	c.applyName()
 
 	formatter, err := newFormatter()
@@ -134,6 +136,8 @@ func (c *client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 	results := c.conn.ProduceSync(ctx, records...)
 	duration := time.Since(startTime)
 
+	// Report every record failure to hooks, but retain only the first failure for
+	// the returned error and log.
 	var (
 		firstErr    error
 		firstRecord *kgo.Record
@@ -239,10 +243,9 @@ func (c *client) Name() string {
 	return c.name
 }
 
-// processFetches processes a single PollRecords result.
-// The separate scope ensures AllowRebalance is deferred per poll when BlockRebalanceOnPoll is enabled.
 func (c *client) processFetches(ctx context.Context, fetches kgo.Fetches) error {
 	if c.blockRebalance {
+		// Allow rebalancing only after the entire poll result has been handled.
 		defer c.conn.AllowRebalance()
 	}
 
@@ -261,6 +264,8 @@ func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) err
 	var fatal kgo.FetchError
 	var recoverable kgo.FetchError
 
+	// Report every fetch error to hooks, but retain only the first fatal and
+	// recoverable errors for logging and control flow.
 	fetches.EachError(func(topic string, partition int32, err error) {
 		isRecoverable := isRecoverableFetchError(err)
 		c.hooks.onFetchError(ctx, topic, partition, isRecoverable, err)
@@ -306,6 +311,8 @@ func (c *client) handleFetchErrors(ctx context.Context, fetches kgo.Fetches) err
 	return nil
 }
 
+// parseKafkaOptions reads consumer behavior from the effective franz-go
+// configuration after the client has been created.
 func (c *client) parseKafkaOptions(conn *kgo.Client) {
 	c.consumerGroup, _ = conn.OptValue(kgo.ConsumerGroup).(string)
 	c.shareGroup, _ = conn.OptValue(kgo.ShareGroup).(string)
@@ -369,6 +376,9 @@ func recordContext(ctx context.Context, record *kgo.Record) context.Context {
 	return ctx
 }
 
+// wait waits for delay unless ctx is canceled or client shutdown begins.
+//
+// A non-positive delay performs only the cancellation and shutdown check.
 func (c *client) wait(ctx context.Context, delay time.Duration) bool {
 	select {
 	case <-ctx.Done():
@@ -395,6 +405,7 @@ func (c *client) wait(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
+// isRecoverableFetchError reports whether xkafka treats err as non-terminal.
 func isRecoverableFetchError(err error) bool {
 	if kerr.IsRetriable(err) {
 		return true

@@ -10,12 +10,17 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Client provides Kafka produce and consume operations.
+// Client provides Kafka produce, consume, and producer transaction operations.
+//
+// Consumption is driven by [Client.HandleFetches].
 type Client struct {
 	cl *client
 }
 
-// NewClient creates a Kafka client with the provided options.
+// NewClient creates a Client configured with opts.
+//
+// Configure [WithBatchHandler] to use [Client.HandleFetches]. Consumer group
+// and Share Group configurations require a batch handler at construction time.
 func NewClient(opts ...Opt) (*Client, error) {
 	cl, err := newClient(opts...)
 	if err != nil {
@@ -44,7 +49,9 @@ func NewClient(opts ...Opt) (*Client, error) {
 	return c, nil
 }
 
-// Name returns the logical client name configured with WithName.
+// Name returns the logical client name configured with [WithName].
+//
+// It returns an empty string if no name was configured.
 func (c *Client) Name() string {
 	if c == nil || c.cl == nil {
 		return ""
@@ -53,6 +60,7 @@ func (c *Client) Name() string {
 	return c.cl.Name()
 }
 
+// Ping verifies that at least one Kafka broker is reachable.
 func (c *Client) Ping(ctx context.Context) error {
 	if err := c.cl.Client().Ping(ctx); err != nil {
 		return fmt.Errorf("kafka: ping client: %w", err)
@@ -61,26 +69,46 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// Produce enqueues record for asynchronous delivery.
+//
+// promise is called when delivery completes. If promise is nil, the callback
+// configured with [WithProducePromise] is used, if any.
+//
+// Produce may wait for producer buffer space. Use [Client.TryProduce] when
+// enqueueing must not wait for buffer availability.
 func (c *Client) Produce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.cl.Produce(ctx, record, promise)
 }
 
+// TryProduce attempts to enqueue record without waiting for producer buffer
+// space.
+//
+// If the producer buffer is full, delivery fails immediately. Other delivery
+// semantics are the same as [Client.Produce].
 func (c *Client) TryProduce(ctx context.Context, record *kgo.Record, promise PromiseFunc) {
 	c.cl.TryProduce(ctx, record, promise)
 }
 
+// ProduceSync produces records and waits for all of them to complete.
+//
+// It returns the first produce error, if any.
 func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error {
 	return c.cl.ProduceSync(ctx, records...)
 }
 
-// RunInTx executes fn inside a Kafka transaction.
+// RunInTx executes fn inside a producer transaction.
 //
-// The transaction is committed when fn returns nil. Once begun, errors before
-// the terminal commit attempt cause the transaction to be aborted. Commit
-// failures are handled according to franz-go transaction recovery semantics.
+// The client must be configured with a transactional ID through
+// [WithKafkaOptions]. If fn returns nil, RunInTx flushes buffered records and
+// attempts to commit the transaction. If fn or the pre-commit flush returns an
+// error, RunInTx attempts to abort the transaction. Commit failures are handled
+// according to franz-go transaction recovery semantics.
 //
-// Panics are re-thrown. If a panic occurs before the terminal commit begins,
-// xkafka first attempts to abort the transaction.
+// If fn panics before the terminal commit begins, RunInTx attempts to abort the
+// transaction and then re-panics with the original value.
+//
+// Produce transactional records through the [Tx] passed to fn. For
+// consume-process-produce exactly-once workflows, use [GroupTransactSession].
 func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	if fn == nil {
 		return errors.New("kafka: transaction function is nil")
@@ -140,13 +168,15 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 		return err
 	}
 
+	// Flush asynchronous produces before attempting to commit the transaction.
 	if err = conn.Flush(ctx); err != nil {
 		err = fmt.Errorf("kafka: flush buffered records: %w", err)
 		return err
 	}
 
-	// EndTransaction is terminal. From this point on, commit failures are
-	// recovered only according to EndTransaction's documented semantics.
+	// Disable the generic deferred abort once the terminal commit begins.
+	// Commit failures are handled explicitly below according to franz-go
+	// transaction recovery semantics.
 	abortOnExit = false
 
 	if err = conn.EndTransaction(ctx, kgo.TryCommit); err != nil {
@@ -166,16 +196,31 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	return nil
 }
 
+// HandleFetches polls Kafka and dispatches fetched records to the configured
+// batch handler.
+//
+// It returns ctx.Err() when ctx is canceled, nil when the client is shut down,
+// or a terminal processing error. Only one HandleFetches call may run at a
+// time.
 func (c *Client) HandleFetches(ctx context.Context) error {
 	return c.cl.HandleFetches(ctx)
 }
 
-// Shutdown stops polling, flushes pending records and acks, and closes the underlying client.
+// Shutdown stops polling, flushes pending producer records and Share Group
+// acknowledgements, and closes the underlying Kafka client.
+//
+// Shutdown is idempotent and safe to call concurrently. Only the first call
+// performs shutdown; subsequent calls return the same result.
+//
+// ctx bounds flushing of producer records and Share Group acknowledgements. The
+// underlying client is closed even if flushing returns an error.
 func (c *Client) Shutdown(ctx context.Context) error {
 	closed := false
 
 	c.cl.shutdownOnce.Do(func() {
 		closed = true
+
+		// Stop polling and retry waits before flushing and closing the client.
 		close(c.cl.exitCh)
 
 		if c.cl.conn == nil {
@@ -232,7 +277,6 @@ func (c *Client) bindHandler() error {
 		return nil
 	}
 
-	// Regular consumer group or direct consumption.
 	c.cl.handleFetches = c.handleFetchesBatch(c.cl.batchHandler)
 
 	return nil
@@ -267,6 +311,9 @@ func (c *Client) handleFetchesBatch(handler BatchHandlerFunc) handleFetchesFunc 
 			return nil
 		}
 
+		// Retry the same fetched records until they succeed or the configured
+		// retry limit is reached. Manual commits and commit marks are applied
+		// only after successful processing.
 		for retries := 0; ; retries++ {
 			handleCtx, err := c.handleRecords(ctx, records, handler)
 			if err != nil {
@@ -327,6 +374,8 @@ func (c *Client) handleShareFetchesBatch(handler BatchHandlerFunc) handleFetches
 
 		handleCtx, err := c.handleRecords(ctx, records, handler)
 
+		// Share Group handler failures use release or rejection semantics rather
+		// than being retried locally.
 		status := kgo.AckAccept
 		if err != nil {
 			status = kgo.AckRelease
@@ -404,6 +453,8 @@ func (c *Client) handleRecords(
 
 	defer func() {
 		if r := recover(); r != nil {
+			// Convert handler panics into handler errors so retry or Share Group
+			// acknowledgement semantics apply.
 			handleErr = fmt.Errorf("kafka: batch handler panic: %v", r)
 		}
 

@@ -7,7 +7,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Opt configures xkafka client behavior.
+// Opt configures Client and GroupTransactSession behavior.
 type Opt interface {
 	apply(*client)
 }
@@ -20,7 +20,7 @@ func (opt clientOpt) apply(c *client) {
 	opt.fn(c)
 }
 
-// WithKafkaOptions appends native franz-go client options.
+// WithKafkaOptions adds native franz-go options to the underlying Kafka client.
 func WithKafkaOptions(opts ...kgo.Opt) Opt {
 	opts = append([]kgo.Opt(nil), opts...)
 
@@ -29,7 +29,11 @@ func WithKafkaOptions(opts ...kgo.Opt) Opt {
 	}}
 }
 
-// WithName sets a stable client name used for observability and as the Kafka client ID.
+// WithName sets the logical client name used for observability and as the
+// Kafka client ID.
+//
+// Leading and trailing whitespace is removed. A non-empty name overrides a
+// client ID configured through [WithKafkaOptions].
 func WithName(name string) Opt {
 	name = strings.TrimSpace(name)
 
@@ -38,10 +42,9 @@ func WithName(name string) Opt {
 	}}
 }
 
-// WithHooks adds hooks for xkafka runtime events.
+// WithHooks registers hooks for xkafka runtime events.
 //
-// A hook may implement any number of the hook interfaces defined by this
-// package. Hooks are called in registration order.
+// See [Hook] for hook behavior and concurrency requirements.
 func WithHooks(hooks ...Hook) Opt {
 	hooks = append([]Hook(nil), hooks...)
 
@@ -59,41 +62,55 @@ func WithLogger(logger kgo.Logger) Opt {
 	}}
 }
 
-// WithProducePromise sets the default callback for asynchronous produce operations.
+// WithProducePromise sets the default callback for asynchronous produce
+// operations.
+//
+// The callback is used when an asynchronous produce call is made with a nil
+// promise.
 func WithProducePromise(promise PromiseFunc) Opt {
 	return clientOpt{fn: func(c *client) {
 		c.promiseFunc = promise
 	}}
 }
 
-// WithBatchHandler sets the batch handler for regular consumers and Share Groups.
+// WithBatchHandler sets the batch handler used by [Client.HandleFetches].
 //
-// When kgo.ShareGroup is configured, Share Group acknowledgement semantics are used.
+// For regular consumers, handler errors are retried according to
+// [WithMaxRetries] and [WithSuspendProcessingTimeout]. Share Group handler
+// errors use release or rejection semantics.
 func WithBatchHandler(handler BatchHandlerFunc) Opt {
 	return clientOpt{fn: func(c *client) {
 		c.batchHandler = handler
 	}}
 }
 
-// WithGroupTransactSessionBatchHandler sets the group transaction session batch handler.
+// WithGroupTransactSessionBatchHandler sets the batch handler used by
+// [GroupTransactSession.HandleFetches].
+//
+// A handler is required when creating a [GroupTransactSession].
 func WithGroupTransactSessionBatchHandler(handler BatchTxHandlerFunc) Opt {
 	return clientOpt{fn: func(c *client) {
 		c.sessionHandler = handler
 	}}
 }
 
-// WithMaxPollRecords sets the maximum number of records handled in one poll iteration.
+// WithMaxPollRecords sets the maximum number of buffered records processed in
+// one poll iteration.
 //
-// Values less than or equal to zero return all currently buffered records.
+// The default is 100. Values less than or equal to zero process all currently
+// buffered records.
 func WithMaxPollRecords(maxPollRecords int) Opt {
 	return clientOpt{fn: func(c *client) {
 		c.maxPollRecords = maxPollRecords
 	}}
 }
 
-// WithMaxRetries sets the maximum number of retries after a regular batch handler error.
+// WithMaxRetries sets the maximum number of retries after the initial regular
+// batch handler attempt.
 //
-// A value of zero disables retries. By default, retries are unlimited.
+// The default is unlimited retries. A value of zero disables retries. Negative
+// values are ignored.
+//
 // This option does not apply to Share Groups or GroupTransactSession handlers.
 func WithMaxRetries(maxRetries int) Opt {
 	return clientOpt{fn: func(c *client) {
@@ -104,6 +121,8 @@ func WithMaxRetries(maxRetries int) Opt {
 }
 
 // WithPollInterval sets the interval between consumer poll iterations.
+//
+// The default is 1 second. Non-positive values are ignored.
 func WithPollInterval(interval time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if interval > 0 {
@@ -112,7 +131,12 @@ func WithPollInterval(interval time.Duration) Opt {
 	}}
 }
 
-// WithSuspendProcessingTimeout sets the wait time after handler errors.
+// WithSuspendProcessingTimeout sets the delay after a handler failure.
+//
+// The delay applies between regular consumer retries and after
+// GroupTransactSession handler errors. The default is 30 seconds.
+//
+// A value of zero disables the delay. Negative values are ignored.
 func WithSuspendProcessingTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if timeout >= 0 {
@@ -121,7 +145,11 @@ func WithSuspendProcessingTimeout(timeout time.Duration) Opt {
 	}}
 }
 
-// WithSuspendCommittingTimeout sets the wait time between offset commit retries.
+// WithSuspendCommittingTimeout sets the delay between manual offset commit
+// retries.
+//
+// The default is 10 seconds. A value of zero retries immediately. Negative
+// values are ignored.
 func WithSuspendCommittingTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if timeout >= 0 {
@@ -130,9 +158,11 @@ func WithSuspendCommittingTimeout(timeout time.Duration) Opt {
 	}}
 }
 
-// WithShareRejectAfterDeliveries rejects failed Share Group records after the given delivery count.
+// WithShareRejectAfterDeliveries rejects a failed Share Group record when its
+// delivery count reaches deliveries.
 //
-// By default, failed records are released for redelivery.
+// The default is zero, which disables rejection and releases failed records for
+// redelivery. Negative values are ignored.
 func WithShareRejectAfterDeliveries(deliveries int32) Opt {
 	return clientOpt{fn: func(c *client) {
 		if deliveries >= 0 {
@@ -141,7 +171,10 @@ func WithShareRejectAfterDeliveries(deliveries int32) Opt {
 	}}
 }
 
-// WithShareReleaseTimeout delays flushing AckRelease acknowledgements after Share Group handler errors.
+// WithShareReleaseTimeout sets the delay before flushing Share Group
+// acknowledgements when records are released for redelivery.
+//
+// The default is zero. Negative values are ignored.
 func WithShareReleaseTimeout(timeout time.Duration) Opt {
 	return clientOpt{fn: func(c *client) {
 		if timeout >= 0 {

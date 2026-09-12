@@ -47,13 +47,16 @@ type spanContextKey struct {
 	spanID  trace.SpanID
 }
 
-// Tracer traces synchronous produce and xkafka runtime operations and propagates
-// trace context through Kafka record headers.
+// Tracer creates OpenTelemetry spans for xkafka runtime operations and
+// propagates context through Kafka record headers.
 //
-// ProduceSync creates one producer span for the whole operation and propagates
-// that span context to every record. Asynchronous Produce and TryProduce only
-// propagate their current context, avoiding per-record producer spans. Consumer
-// handler spans link to unique sampled message creation contexts.
+// Synchronous produce operations create one producer span and propagate its
+// context through every record. Asynchronous produce operations propagate
+// context without creating producer spans.
+//
+// Consumer handler spans link to unique sampled message creation contexts
+// extracted from record headers. Tracer also creates spans for offset commits,
+// Share Group acknowledgement flushes, and transactions.
 type Tracer struct {
 	provider   trace.TracerProvider
 	propagator propagation.TextMapPropagator
@@ -80,9 +83,9 @@ func (o tracerOptFunc) applyTracer(cfg *tracerConfig) {
 	o(cfg)
 }
 
-// TracerProvider configures the OpenTelemetry TracerProvider used by Tracer.
+// TracerProvider sets the OpenTelemetry TracerProvider used by Tracer.
 //
-// If none is specified, the global TracerProvider is used.
+// If provider is nil or this option is not specified, the global TracerProvider is used.
 func TracerProvider(provider trace.TracerProvider) TracerOpt {
 	return tracerOptFunc(func(cfg *tracerConfig) {
 		if provider != nil {
@@ -91,10 +94,11 @@ func TracerProvider(provider trace.TracerProvider) TracerOpt {
 	})
 }
 
-// TracerPropagator configures the OpenTelemetry TextMapPropagator used to
-// inject and extract message creation contexts in Kafka record headers.
+// TracerPropagator sets the OpenTelemetry TextMapPropagator used to inject and
+// extract context through Kafka record headers.
 //
-// If none is specified, the global TextMapPropagator is used.
+// If propagator is nil or this option is not specified, the global
+// TextMapPropagator is used.
 func TracerPropagator(propagator propagation.TextMapPropagator) TracerOpt {
 	return tracerOptFunc(func(cfg *tracerConfig) {
 		if propagator != nil {
@@ -103,7 +107,7 @@ func TracerPropagator(propagator propagation.TextMapPropagator) TracerOpt {
 	})
 }
 
-// NewTracer creates a Tracer for xkafka runtime operations.
+// NewTracer creates a Tracer configured with opts.
 func NewTracer(opts ...TracerOpt) *Tracer {
 	cfg := tracerConfig{}
 
@@ -291,7 +295,7 @@ func (t *Tracer) OnTransactionEnd(
 	endSpan(span, err)
 }
 
-// recordSettlementSpan records a completed settlement operation using its duration.
+// recordSettlementSpan records a completed settlement operation with timestamps reconstructed from duration.
 func (t *Tracer) recordSettlementSpan(ctx context.Context, operationName string, duration time.Duration, err error) {
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
@@ -312,7 +316,7 @@ func (t *Tracer) recordSettlementSpan(ctx context.Context, operationName string,
 	endSpan(span, err, trace.WithTimestamp(endTime))
 }
 
-// recordLinks returns unique sampled message creation contexts for the records.
+// recordLinks returns unique sampled message creation contexts extracted from record headers.
 func (t *Tracer) recordLinks(records []*kgo.Record) []trace.Link {
 	var (
 		links    []trace.Link
@@ -339,8 +343,8 @@ func (t *Tracer) recordLinks(records []*kgo.Record) []trace.Link {
 			spanID:  spanContext.SpanID(),
 		}
 
-		// Most batches contain many records from the same upstream span.
-		// Keep the first context separately to avoid allocating a dedup map.
+		// Keep the first context separately to avoid allocating a dedup map when the
+		// batch shares one upstream span.
 		if len(links) == 0 {
 			firstKey = key
 			links = append(links, trace.Link{SpanContext: spanContext})

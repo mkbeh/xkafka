@@ -2,7 +2,10 @@ package otelxkafka
 
 import "github.com/mkbeh/xkafka"
 
-// Kotel combines OpenTelemetry meter and tracer hooks for xkafka.
+// Kotel combines OpenTelemetry instrumentation components into xkafka hooks.
+//
+// Configure it with [WithMeter], [WithTracer], or both, then pass [Kotel.Hooks]
+// to [xkafka.WithHooks].
 type Kotel struct {
 	meter  *Meter
 	tracer *Tracer
@@ -19,7 +22,9 @@ func (o optFunc) apply(k *Kotel) {
 	o(k)
 }
 
-// WithTracer configures Kotel with a Tracer.
+// WithTracer sets the Tracer used by Kotel.
+//
+// A nil tracer is ignored.
 func WithTracer(tracer *Tracer) Opt {
 	return optFunc(func(k *Kotel) {
 		if tracer != nil {
@@ -28,7 +33,9 @@ func WithTracer(tracer *Tracer) Opt {
 	})
 }
 
-// WithMeter configures Kotel with a Meter.
+// WithMeter sets the Meter used by Kotel.
+//
+// A nil meter is ignored.
 func WithMeter(meter *Meter) Opt {
 	return optFunc(func(k *Kotel) {
 		if meter != nil {
@@ -37,7 +44,7 @@ func WithMeter(meter *Meter) Opt {
 	})
 }
 
-// NewKotel creates a Kotel and applies opts to it.
+// NewKotel creates a Kotel configured with opts.
 func NewKotel(opts ...Opt) *Kotel {
 	k := &Kotel{}
 
@@ -48,7 +55,9 @@ func NewKotel(opts ...Opt) *Kotel {
 	return k
 }
 
-// Hooks returns xkafka hooks for the configured telemetry components.
+// Hooks returns the configured telemetry components as xkafka hooks.
+//
+// If no telemetry components are configured, Hooks returns no hooks.
 func (k *Kotel) Hooks() []xkafka.Hook {
 	var hooks []xkafka.Hook
 

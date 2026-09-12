@@ -36,7 +36,10 @@ const (
 // durationBuckets are histogram boundaries in seconds.
 var durationBuckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
-// Meter exports xkafka runtime metrics through OpenTelemetry hooks.
+// Meter records xkafka runtime metrics through OpenTelemetry hooks.
+//
+// It records metrics for produce and fetch errors, handler processing, offset
+// commits, Share Group acknowledgements, and transactions.
 type Meter struct {
 	provider    metric.MeterProvider
 	meter       metric.Meter
@@ -81,9 +84,10 @@ func (o meterOptFunc) applyMeter(cfg *meterConfig) {
 	o(cfg)
 }
 
-// MeterProvider configures the OpenTelemetry MeterProvider used by Meter.
+// MeterProvider sets the OpenTelemetry MeterProvider used by Meter.
 //
-// If none is specified, the global MeterProvider is used.
+// If provider is nil or this option is not specified, the global MeterProvider
+// is used.
 func MeterProvider(provider metric.MeterProvider) MeterOpt {
 	return meterOptFunc(func(cfg *meterConfig) {
 		if provider != nil {
@@ -92,7 +96,7 @@ func MeterProvider(provider metric.MeterProvider) MeterOpt {
 	})
 }
 
-// NewMeter creates a Meter for xkafka runtime metrics.
+// NewMeter creates a Meter configured with opts.
 func NewMeter(opts ...MeterOpt) *Meter {
 	cfg := meterConfig{}
 
@@ -168,10 +172,10 @@ func (m *Meter) OnHandleEnd(ctx context.Context, records []*kgo.Record, duration
 		return
 	}
 
-	// Derived attribute slices are capped before appending so baseAttrs remains reusable.
 	baseAttrs := m.consumerAttributes()
 
 	if processEnabled {
+		// Prevent appended attributes from modifying baseAttrs.
 		attrs := baseAttrs[:len(baseAttrs):len(baseAttrs)]
 
 		topic, _ := commonRecordDestination(records)

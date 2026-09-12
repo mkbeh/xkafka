@@ -2,10 +2,15 @@ package otelxkafka
 
 import "runtime/debug"
 
-// ScopeName is the OpenTelemetry instrumentation scope name.
+// ScopeName is the OpenTelemetry instrumentation scope name used by this
+// package.
 const ScopeName = "github.com/mkbeh/xkafka/extra/otelxkafka"
 
-// Version returns the version of the otelxkafka instrumentation module.
+// Version returns the version of the otelxkafka module from Go build
+// information.
+//
+// It returns "unknown" when build information is unavailable or does not
+// contain this module.
 func Version() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
