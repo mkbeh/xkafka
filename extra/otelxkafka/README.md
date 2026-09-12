@@ -155,7 +155,7 @@ func processRecords(ctx context.Context, records []*kgo.Record) error {
     }
 
     // Optionally pass ctx to the next processing step.
-	
+
     return nil
 }
 ```

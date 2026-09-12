@@ -3,7 +3,8 @@ module otel
 go 1.27
 
 require (
-	github.com/mkbeh/xkafka v0.5.1
+	github.com/mkbeh/xkafka v0.6.0
+	github.com/mkbeh/xkafka/extra/otelxkafka v0.6.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/twmb/franz-go v1.21.6
 	github.com/twmb/franz-go/plugin/kotel v1.7.0

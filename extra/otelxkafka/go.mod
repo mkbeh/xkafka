@@ -3,7 +3,7 @@ module github.com/mkbeh/xkafka/extra/otelxkafka
 go 1.27
 
 require (
-	github.com/mkbeh/xkafka v0.5.1
+	github.com/mkbeh/xkafka v0.6.0
 	github.com/twmb/franz-go v1.21.6
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0

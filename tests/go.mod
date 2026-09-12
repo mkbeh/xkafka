@@ -3,7 +3,7 @@ module github.com/mkbeh/xkafka/tests
 go 1.27
 
 require (
-	github.com/mkbeh/xkafka v0.5.1
+	github.com/mkbeh/xkafka v0.6.0
 	github.com/twmb/franz-go v1.21.6
 	github.com/twmb/franz-go/pkg/kadm v1.18.0
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260910202332-a67cdf941cc3
