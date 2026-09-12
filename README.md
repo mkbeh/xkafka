@@ -250,8 +250,9 @@ Each fetched batch is processed inside a single group transaction:
 | `error`        | Attempts to abort the transaction, leaving the input offsets uncommitted for redelivery. |
 | `panic`        | Recovers the panic and follows the same abort path as an error.                          |
 
-Transaction begin or end errors are terminal, stopping the fetch loop instead of starting another transaction on the
-same session.
+> [!IMPORTANT]
+> Unrecoverable transaction errors are returned from `HandleFetches` and stop the session. Handler errors and panics
+> abort the current transaction but do not stop the fetch loop by themselves.
 
 ## Telemetry
 
