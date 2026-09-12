@@ -2,13 +2,13 @@
 
 This directory contains runnable examples demonstrating the main features and usage patterns of `xkafka`.
 
-| Example                      | Demonstrates                                                                        |
-|------------------------------|-------------------------------------------------------------------------------------|
-| [basic](basic)               | Synchronous producing and batch consumption with `xkafka.Client`                    |
-| [transactions](transactions) | Atomic producer transactions and consuming only committed records                   |
-| [share_group](share_group)   | Kafka Share Groups with concurrent processing, redelivery, and rejection            |
-| [eos](eos)                   | Kafka-to-Kafka exactly-once processing with `GroupTransactSession`                  |
-| [otel](otel)                 | OpenTelemetry metrics and distributed tracing with native `franz-go` client metrics |
+| Example                        | Demonstrates                                                                      |
+|--------------------------------|-----------------------------------------------------------------------------------|
+| [`basic`](basic)               | Synchronous producing and batch consumption using `xkafka.Client`.                |
+| [`transactions`](transactions) | Atomic producer transactions and `read_committed` isolation level.                |
+| [`share_group`](share_group)   | Kafka Share Groups with concurrent scaling, record redelivery, and rejection.     |
+| [`eos`](eos)                   | Exactly-Once Semantics (EOS) pipelines using `GroupTransactSession`.              |
+| [`otel`](otel)                 | OpenTelemetry metrics, distributed tracing, and native `franz-go` client metrics. |
 
 ## Running the examples
 
