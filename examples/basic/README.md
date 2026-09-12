@@ -4,11 +4,11 @@ This example shows the basic `xkafka.Client` workflow for producing and consumin
 
 **This example demonstrates:**
 
-* Creating a client for both producing and consuming;
-* Checking connectivity to Kafka;
-* Producing records synchronously;
-* Processing consumed records in batches;
-* Handling polling errors and application shutdown gracefully.
+* Creating a client for both producing and consuming
+* Checking connectivity to Kafka
+* Producing records synchronously
+* Processing consumed records in batches
+* Handling polling errors and application shutdown gracefully
 
 ## Local Kafka setup
 
@@ -73,7 +73,7 @@ HTTP 204
 Example log:
 
 ```text
-consume: topic=sample-topic partition=0 offset=0 key="basic" msg={ID:42 Text:hello from xkafka}
+consume: topic=sample-topic key="basic" msg={ID:42 Text:hello from xkafka}
 ```
 
 ## Stop services
