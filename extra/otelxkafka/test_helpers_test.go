@@ -19,7 +19,7 @@ import (
 
 const (
 	testScopeName        = "github.com/mkbeh/xkafka/extra/otelxkafka"
-	testGenericErrorType = "*errors.errorString"
+	testGenericErrorType = "_OTHER"
 )
 
 func newTestMeter(t *testing.T, opts ...MeterOpt) (*Meter, *sdkmetric.ManualReader) {

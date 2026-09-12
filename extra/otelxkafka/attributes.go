@@ -67,10 +67,9 @@ func normalizeAttributes(attrs ...attribute.KeyValue) []attribute.KeyValue {
 }
 
 func errorTypeAttribute(err error) attribute.KeyValue {
-	var kafkaErr *kerr.Error
-	if errors.As(err, &kafkaErr) && kafkaErr != nil && kafkaErr.Message != "" {
+	if kafkaErr, ok := errors.AsType[*kerr.Error](err); ok {
 		return semconv.ErrorTypeKey.String(kafkaErr.Message)
 	}
 
-	return semconv.ErrorType(err)
+	return semconv.ErrorTypeOther
 }
