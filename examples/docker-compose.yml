@@ -1,13 +1,8 @@
-version: '3.9'
-
 services:
   kafka:
     image: confluentinc/cp-kafka:latest
-    container_name: sample-kafka
     ports:
-      - "9092:9092"
       - "29092:29092"
-      - "9093:9093"
     environment:
       # KRaft mode
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
@@ -24,82 +19,68 @@ services:
 
       # Single-broker internal topics
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
 
-      # Transactions for single-broker dev environment
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 1
 
-      # Share groups for single-broker dev environment
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_NUM_PARTITIONS: 1
 
-      # Settings
+      # Local development
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
-    networks:
-      - sample-network
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
-  panda:
+  console:
     image: docker.redpanda.com/redpandadata/console:latest
-    container_name: sample-panda
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "18080:8080"
     environment:
       KAFKA_BROKERS: "kafka:9092"
-      KAFKA_TLS_ENABLED: "false"
-      KAFKA_SASL_ENABLED: "false"
-    networks:
-      - sample-network
 
   jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: sample-jaeger
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+    image: cr.jaegertracing.io/jaegertracing/jaeger:latest
     ports:
       - "16686:16686" # Jaeger UI
-      - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-    networks:
-      - sample-network
 
   init-kafka:
     image: confluentinc/cp-kafka:latest
-    container_name: sample-kafka-init
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     entrypoint:
       - /bin/bash
       - -lc
       - |
-        set -e
-        
+        set -euo pipefail
+
         TOPICS=(
           "sample-topic"
-          "sample-otel-topic"
           "sample-tx-topic"
           "sample-share-topic"
           "sample-eos-input-topic"
           "sample-eos-output-topic"
-          "sample-env-topic"
-          "sample-tracing-topic"
+          "sample-otel-topic-a"
+          "sample-otel-topic-b"
         )
-        
-        echo "init-kafka started"
-        
-        echo "Waiting for Kafka..."
-        until kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do
-          echo "Kafka is not ready yet..."
-          sleep 2
-        done
-        
-        for topic in $${TOPICS[@]}; do
+
+        for topic in "$${TOPICS[@]}"; do
           echo "Creating topic: $${topic}"
-        
+
           kafka-topics \
             --bootstrap-server kafka:9092 \
             --create \
@@ -108,23 +89,6 @@ services:
             --replication-factor 1 \
             --partitions 3
         done
-        
-        echo "Topics after creation:"
-        kafka-topics --bootstrap-server kafka:9092 --list
-        
-        echo "Topic descriptions:"
-        
-        for topic in $${TOPICS[@]}; do
-          kafka-topics \
-            --bootstrap-server kafka:9092 \
-            --describe \
-            --topic "$${topic}"
-        done
-        
-        echo "init-kafka finished"
-    networks:
-      - sample-network
 
-networks:
-  sample-network:
-    driver: bridge
+        echo "Kafka topics:"
+        kafka-topics --bootstrap-server kafka:9092 --list

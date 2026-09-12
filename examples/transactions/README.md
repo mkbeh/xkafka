@@ -1,14 +1,14 @@
 # Transactions Example
 
-This example shows how to use Kafka producer transactions and consume only committed records.
+This example demonstrates how to use Kafka transactions for atomic record publishing and consume only committed records.
 
 **This example demonstrates:**
 
-* Creating a dedicated transactional producer
-* Committing records in a transaction
-* Aborting transactions when processing returns an error
-* Aborting transactions before re-throwing a panic
-* Consuming only records from committed transactions
+* **Creating a transactional producer** for atomic write operations
+* **Committing records atomically** within a transaction
+* **Aborting transactions on errors** returned from transactional processing
+* **Handling panics safely** by aborting the transaction before re-throwing the panic
+* **Reading only committed records** from a downstream consumer
 
 ## Local Kafka setup
 

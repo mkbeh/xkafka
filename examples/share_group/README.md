@@ -1,13 +1,14 @@
 # Share Group Example
 
-This example shows how multiple consumers can process records from the same Kafka Share Group.
+This example demonstrates how to use Kafka Share Groups (KIP-932) to distribute and process records concurrently with
+queue-like delivery semantics.
 
 **This example demonstrates:**
 
-* Running multiple consumers in one Share Group
-* Accepting successfully processed records
-* Releasing failed records for redelivery
-* Rejecting records after repeated processing failures
+* **Scaling concurrent consumption** across multiple consumers in a single Share Group
+* **Accepting successfully processed records** so they are not delivered again
+* **Redelivering failed records** so another processing attempt can be made
+* **Handling poison records** by rejecting them after repeated processing failures
 
 ## Local Kafka setup
 

@@ -1,14 +1,14 @@
 # Basic Example
 
-This example shows the basic `xkafka.Client` workflow for producing and consuming Kafka records.
+This example demonstrates the basic `xkafka.Client` workflow for producing and consuming Kafka records.
 
 **This example demonstrates:**
 
-* Creating a client for both producing and consuming
-* Checking connectivity to Kafka
-* Producing records synchronously
-* Processing consumed records in batches
-* Handling polling errors and application shutdown gracefully
+* **Creating a dual-purpose client** for both producing and consuming
+* **Checking Kafka connectivity** before starting the application workflow
+* **Publishing records synchronously** to Kafka
+* **Processing consumed records** in batches
+* **Managing the application lifecycle** with polling error handling and graceful shutdown
 
 ## Local Kafka setup
 

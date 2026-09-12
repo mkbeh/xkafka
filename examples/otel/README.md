@@ -1,37 +1,15 @@
-# OpenTelemetry Observability Example
+# OpenTelemetry Example
 
-This example combines native franz-go telemetry with xkafka runtime telemetry in one runnable setup.
+This example demonstrates how to add OpenTelemetry metrics and distributed tracing to `xkafka` while also collecting
+native `franz-go` client metrics.
 
 **This example demonstrates:**
 
-* exporting native Kafka client metrics through `franz-go/plugin/kotel`;
-* exporting xkafka runtime metrics through `extra/otelxkafka` hooks;
-* tracing franz-go record operations and xkafka handler/settlement operations;
-* sharing one OpenTelemetry `MeterProvider` and `TracerProvider` across both instrumentation layers;
-* sharing one trace propagator across both tracers;
-* exposing metrics through a Prometheus `/metrics` endpoint;
-* exporting spans and Kafka/xkafka logs to stderr;
-* producing and consuming a record to generate telemetry.
-
-The observability layers are independent and complementary:
-
-```text
-xkafka hooks ───── otelxkafka.Meter ──┐
-                                      ├── OTel MeterProvider ── Prometheus /metrics
-franz-go hooks ─── kotel.Meter ────────┘
-
-xkafka hooks ───── otelxkafka.Tracer ──┐
-                                       ├── OTel TracerProvider ── stderr
-franz-go hooks ─── kotel.Tracer ────────┘
-
-xkafka + franz-go logs ── WithLogger ─────────────────────────── stderr
-```
-
-`kotel.Meter` owns native franz-go client metrics such as broker, byte, and record telemetry. `otelxkafka.Meter` owns wrapper-level behavior such as handler processing, settlement operations, Share Group acknowledgement outcomes, and transactions.
-
-`kotel.Tracer` instruments Kafka record produce/receive operations and propagates trace context through record headers. `otelxkafka.Tracer` adds xkafka process, settlement, and transaction spans on top of that record-level trace context.
-
-OpenTelemetry instrumentation and logging are opt-in. The example attaches xkafka telemetry with `WithHooks`, native franz-go telemetry with `kgo.WithHooks` through `WithKafkaOptions`, and logging explicitly through `WithLogger`.
+* **Collecting native client metrics** from the underlying `franz-go` client
+* **Exporting xkafka runtime metrics** through OpenTelemetry
+* **Tracing message processing** across synchronous producing and batch consumption
+* **Propagating trace context** through Kafka records
+* **Observing processing failures and retries** through metrics and traces
 
 ## Local Kafka setup
 
@@ -59,6 +37,15 @@ Redpanda Console is available at:
 http://localhost:18080
 ```
 
+Jaeger UI is available at:
+
+```text
+http://localhost:16686
+```
+
+The example uses the `sample-otel-topic-a` and `sample-otel-topic-b` topics
+created by the local Kafka setup.
+
 ## Run
 
 From this directory:
@@ -79,17 +66,16 @@ The HTTP server listens on:
 http://localhost:8080
 ```
 
-Prometheus metrics are available at:
+Prometheus metrics are exposed at:
 
 ```text
 http://localhost:8080/metrics
 ```
 
-Traces, Kafka/xkafka logs, and the example's consume output are written to stderr.
+## Produce a mixed-topic batch
 
-## Produce and consume
-
-Produce one record:
+`POST /produce` publishes ten records in one synchronous produce operation:
+five records to each example topic.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/produce'
@@ -98,104 +84,81 @@ curl -i -X POST 'http://localhost:8080/produce'
 Expected response:
 
 ```text
-HTTP 204
+HTTP 202
+published 10 records: 5 to sample-otel-topic-a and 5 to sample-otel-topic-b
 ```
 
-The same client consumes the record and logs it to stderr:
+Example log:
 
 ```text
-consume: topic=sample-otel-topic partition=0 offset=0 key="otel" msg={ID:42 Text:hello from xkafka otel example}
+consume: topic=sample-otel-topic-a key="1" msg={ID:1 Text:otel message 1}
+...
+consume: topic=sample-otel-topic-b key="6" msg={ID:6 Text:otel message 6}
+...
 ```
 
-Partition and offset values depend on the Kafka topic state.
+The produce operation creates one `send` span and propagates its trace context
+through the records. Each batch handler invocation creates one `process` span.
+Sampled message creation contexts propagated through the records are linked to
+that `process` span.
+
+## Observe a handler error and retry
+
+`POST /produce-error` publishes record `888`. The consumer handler intentionally
+fails on the first processing attempt and succeeds on the configured retry.
+
+```shell
+curl -i -X POST 'http://localhost:8080/produce-error'
+```
+
+Expected response:
+
+```text
+HTTP 202
+published record that fails once in the consumer handler
+```
+
+The failed and successful processing attempts can then be inspected in the
+exported metrics and traces.
 
 ## Metrics
 
-The example uses one `MeterProvider` for both instrumentation layers:
+Open the Prometheus endpoint:
 
-```go
-kafkaTelemetry := kotel.NewKotel(
-    kotel.WithMeter(
-        kotel.NewMeter(
-            kotel.MeterProvider(meterProvider),
-        ),
-    ),
-)
-
-xkafkaTelemetry := otelxkafka.NewKotel(
-    otelxkafka.WithMeter(
-        otelxkafka.NewMeter(
-            otelxkafka.MeterProvider(meterProvider),
-        ),
-    ),
-)
+```shell
+curl http://localhost:8080/metrics
 ```
 
-The xkafka instrumentation exports:
+The endpoint exposes both native franz-go client metrics and xkafka runtime
+metrics through the OpenTelemetry Prometheus exporter.
+
+## Traces
+
+Open Jaeger:
 
 ```text
-xkafka.produce.errors
-xkafka.fetch.errors
-messaging.process.duration
-xkafka.handler.records
-messaging.client.operation.duration
-xkafka.share.ack.records
-xkafka.transaction.duration
+http://localhost:16686
 ```
 
-For regular consumer processing, the most useful pair is:
+Select service:
 
 ```text
-messaging.process.duration
-    handler attempt duration by consumer group and error.type
-
-xkafka.handler.records
-    successfully processed records by topic and consumer group
+xkafka-otel-example
 ```
 
-`messaging.client.operation.duration` is used for settlement operations such as offset `commit` and Share Group `ack`. `xkafka.transaction.duration` records xkafka transaction attempts by transaction type and outcome.
+The example exposes producer `send` spans, batch `process` spans, settlement
+spans for offset commits, and propagated trace context across Kafka records.
 
-`WithName("otel")` is exported as `messaging.client.id`. The consumer group is exported as `messaging.consumer.group.name`.
+## Stop services
 
-Prometheus normalizes OpenTelemetry metric names for exposition, so dots in instrument names appear as underscores in `/metrics`.
+From the repository root:
 
-## Tracing
-
-The example configures both tracers with the same propagator:
-
-```go
-propagator := propagation.NewCompositeTextMapPropagator(
-    propagation.TraceContext{},
-    propagation.Baggage{},
-)
+```shell
+docker compose -f examples/docker-compose.yml down --remove-orphans -v
 ```
 
-Native franz-go telemetry is attached through:
+Or from this example directory:
 
-```go
-kgo.WithHooks(kafkaTelemetry.Hooks()...)
+```shell
+docker compose -f ../docker-compose.yml down --remove-orphans -v
 ```
-
-xkafka runtime telemetry is attached separately through:
-
-```go
-xkafka.WithHooks(xkafkaTelemetry.Hooks()...)
-```
-
-`kotel.Tracer` creates Kafka record produce/receive spans and propagates trace context through record headers. `otelxkafka.Tracer` uses that creation context for handler process links and adds settlement and transaction spans where xkafka owns the higher-level operation.
-
-## Logging
-
-The example enables one logger for both xkafka and franz-go:
-
-```go
-xkafka.WithLogger(
-    kgo.BasicLogger(os.Stderr, kgo.LogLevelInfo, nil),
-)
-```
-
-Logging is disabled by default unless `WithLogger` is configured.
-
-## Stop
-
-Press `Ctrl+C` to stop the HTTP server and Kafka client and shut down the OpenTelemetry `MeterProvider` and `TracerProvider`.
