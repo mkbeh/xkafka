@@ -132,8 +132,13 @@ if err != nil {
 
 <!-- @formatter:on -->
 
-When the transaction function returns `nil`, `xkafka` attempts to commit the transaction. If it returns an error,
-`xkafka` attempts to abort it. Panics follow the same abort path before being re-thrown.
+The transaction function controls how `xkafka` completes the transaction:
+
+| Function Outcome    | Transaction Action | Behavior                                                         |
+|---------------------|--------------------|------------------------------------------------------------------|
+| **Success (`nil`)** | Commit             | Flushes buffered records and attempts to commit the transaction. |
+| **Error**           | Abort              | Attempts to abort the transaction and returns the error.         |
+| **Panic**           | Abort              | Attempts to abort the transaction before re-throwing the panic.  |
 
 ## Share Groups
 
@@ -177,17 +182,11 @@ if err := client.HandleFetches(context.Background()); err != nil {
 
 For Share Groups, handler outcomes are mapped to record-level Kafka acknowledgements:
 
-| Handler Result | Acknowledgement | Behavior |
-|---|---|---|
-| **Returns `nil`** | `AckAccept` | Marks all records in the batch as successfully processed. |
-| **Returns an `error`** | `AckRelease` / `AckReject` | Releases failed records for redelivery. Optional release delay and delivery-count based rejection can be configured. |
-| **Panics** | `AckRelease` / `AckReject` | Recovers the panic and handles it through the same acknowledgement path as a handler error. |
-
-Additional failure behavior can be configured with:
-
-* **`WithShareReleaseTimeout`** — Delays acknowledgement flushing for released records, which can slow down redelivery.
-* **`WithShareRejectAfterDeliveries`** — Changes failed records from `AckRelease` to `AckReject` once their delivery
-  count reaches the configured threshold.
+| Handler Outcome     | Acknowledgement            | Behavior                                                                                                                                                                                                                                                 |
+|---------------------|----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Success (`nil`)** | `AckAccept`                | Marks all records in the batch as successfully processed.                                                                                                                                                                                                |
+| **Error**           | `AckRelease` / `AckReject` | Releases failed records for broker redelivery. `WithShareReleaseTimeout` can delay acknowledgement flushing, while `WithShareRejectAfterDeliveries` changes the acknowledgement to `AckReject` once the delivery count reaches the configured threshold. |
+| **Panic**           | `AckRelease` / `AckReject` | Recovers the panic and handles it through the same failure path as an error, including the configured release and rejection policies.                                                                                                                    |
 
 ## Exactly-Once Semantics (EOS)
 
@@ -245,11 +244,11 @@ if err := session.HandleFetches(context.Background()); err != nil {
 
 Each fetched batch is processed inside a single group transaction:
 
-| Handler Result         | Transaction Action | Behavior                                                                                 |
-|:-----------------------|:-------------------|:-----------------------------------------------------------------------------------------|
-| **Returns `nil`**      | Commit             | Attempts to atomically commit the produced records and consumed offsets.                 |
-| **Returns an `error`** | Abort              | Attempts to abort the transaction, leaving the input offsets uncommitted for redelivery. |
-| **Panics**             | Abort              | Recovers the panic and handles it through the same abort path as a handler error.        |
+| Handler Outcome     | Transaction Action | Behavior                                                                                 |
+|---------------------|--------------------|------------------------------------------------------------------------------------------|
+| **Success (`nil`)** | Commit             | Attempts to atomically commit the produced records and consumed offsets.                 |
+| **Error**           | Abort              | Attempts to abort the transaction, leaving the input offsets uncommitted for redelivery. |
+| **Panic**           | Abort              | Recovers the panic and handles it through the same abort path as an error.               |
 
 Transaction begin or end errors are terminal, stopping the fetch loop instead of starting another transaction on the
 same session.
