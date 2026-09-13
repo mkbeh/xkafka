@@ -3,318 +3,371 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/mkbeh/xkafka"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-const defaultMessagesCount = 10
+const (
+	brokers         = "localhost:29092"
+	inputTopic      = "sample-eos-input-topic"
+	outputTopic     = "sample-eos-output-topic"
+	group           = "sample-eos-group"
+	outputGroup     = "sample-eos-output-group"
+	transactionalID = "sample-eos-session"
+	httpAddr        = "localhost:8080"
+	messageCount    = 5
+	pollInterval    = 100 * time.Millisecond
 
-var (
-	inputProducer  *xkafka.Client
-	txSession      *xkafka.GroupTransactSession
-	outputConsumer *xkafka.Client
+	forcedHandlerErrorID = 888
+	forcedHandlerPanicID = 444
 )
 
-var (
-	brokers         string
-	inputTopic      string
-	outputTopic     string
-	group           string
-	outputGroup     string
-	transactionalID string
-	messagesCount   int
-)
-
-func init() {
-	brokers = os.Getenv("BROKERS")
-
-	inputTopic = getenv("EOS_INPUT_TOPIC", "sample-eos-input-topic")
-	outputTopic = getenv("EOS_OUTPUT_TOPIC", "sample-eos-output-topic")
-	group = getenv("EOS_GROUP", "sample-eos-group")
-	outputGroup = getenv("EOS_OUTPUT_GROUP", "sample-eos-output-group")
-	transactionalID = getenv("EOS_TRANSACTIONAL_ID", "sample-eos-session")
-	messagesCount = getenvInt("EOS_MESSAGES", defaultMessagesCount)
-}
-
-type InputMessage struct {
+type inputMessage struct {
 	ID int `json:"id"`
 }
 
-type OutputMessage struct {
-	ID        int    `json:"id"`
-	Source    string `json:"source"`
-	Processed bool   `json:"processed"`
+type outputMessage struct {
+	ID      int    `json:"id"`
+	Source  string `json:"source"`
+	Attempt int    `json:"attempt"`
 }
 
-func produceInputHandler(w http.ResponseWriter, r *http.Request) {
-	var msg InputMessage
-
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	records := make([]*kgo.Record, 0, messagesCount)
-
-	for i := 0; i < messagesCount; i++ {
-		message := InputMessage{
-			ID: msg.ID + i,
-		}
-
-		payload, err := json.Marshal(&message)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		records = append(records, &kgo.Record{
-			Topic: inputTopic,
-			Key:   []byte(strconv.Itoa(message.ID)),
-			Value: payload,
-		})
-	}
-
-	if err := inputProducer.ProduceSync(r.Context(), records...); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintf(w, "published %d input messages\n", len(records))
+type recordID struct {
+	topic     string
+	partition int32
+	offset    int64
 }
 
-func produceInputErrorHandler(w http.ResponseWriter, r *http.Request) {
-	records := make([]*kgo.Record, 0, 2)
-
-	messages := []InputMessage{
-		{ID: 777},
-		{ID: 888},
-	}
-
-	for _, msg := range messages {
-		payload, err := json.Marshal(&msg)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		records = append(records, &kgo.Record{
-			Topic: inputTopic,
-			Key:   []byte("eos-error-flow"),
-			Value: payload,
-		})
-	}
-
-	if err := inputProducer.ProduceSync(r.Context(), records...); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "published one successful input message and one failing input message")
-}
-
-func produceInputPanicHandler(w http.ResponseWriter, r *http.Request) {
-	msg := InputMessage{ID: 444}
-
-	payload, err := json.Marshal(&msg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := inputProducer.ProduceSync(r.Context(), &kgo.Record{
-		Topic: inputTopic,
-		Key:   []byte(strconv.Itoa(msg.ID)),
-		Value: payload,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "published input message that triggers handler panic")
+type processor struct {
+	attempts map[recordID]int
 }
 
 func main() {
-	ctx := context.Background()
+	if err := run(); err != nil {
+		log.Fatalln(err)
+	}
+}
 
-	var err error
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	inputProducer, err = xkafka.NewClient(
-		xkafka.WithConfig(&xkafka.Config{
-			Brokers: brokers,
-		}),
-		xkafka.WithClientID("eos-input-producer"),
+	inputProducer, err := xkafka.NewClient(
+		xkafka.WithName("eos-input-producer"),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.DefaultProduceTopic(inputTopic),
+		),
 	)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create input producer: %w", err)
 	}
-	defer inputProducer.Shutdown(ctx)
+	defer shutdownClient("input producer", inputProducer)
 
-	txSession, err = newGroupTransactSession()
+	handler := &processor{
+		attempts: make(map[recordID]int),
+	}
+
+	session, err := xkafka.NewGroupTransactSession(
+		xkafka.WithName("eos-session"),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.ConsumeTopics(inputTopic),
+			kgo.ConsumerGroup(group),
+			kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+			kgo.FetchIsolationLevel(kgo.ReadCommitted()),
+			kgo.DefaultProduceTopic(outputTopic),
+			kgo.TransactionalID(transactionalID),
+		),
+		xkafka.WithMaxPollRecords(messageCount),
+		xkafka.WithPollInterval(pollInterval),
+		xkafka.WithSuspendProcessingTimeout(time.Second),
+		xkafka.WithGroupTransactSessionBatchHandler(handler.handle),
+	)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create group transact session: %w", err)
 	}
-	defer func() {
-		if err := txSession.Shutdown(ctx); err != nil {
-			log.Println("group transact session shutdown error:", err)
-		}
-	}()
+	defer shutdownSession("group transact session", session)
 
-	outputConsumer, err = newOutputConsumer()
+	outputConsumer, err := xkafka.NewClient(
+		xkafka.WithName("eos-output-consumer"),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.ConsumeTopics(outputTopic),
+			kgo.ConsumerGroup(outputGroup),
+			kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+			kgo.FetchIsolationLevel(kgo.ReadCommitted()),
+		),
+		xkafka.WithPollInterval(pollInterval),
+		xkafka.WithBatchHandler(handleOutputRecords),
+	)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("create output consumer: %w", err)
 	}
-	defer func() {
-		if err := outputConsumer.Shutdown(ctx); err != nil {
-			log.Println("output consumer shutdown error:", err)
-		}
-	}()
+	defer shutdownClient("output consumer", outputConsumer)
 
+	if err := pingClient(ctx, "input producer", inputProducer); err != nil {
+		return err
+	}
+	if err := pingSession(ctx, "group transact session", session); err != nil {
+		return err
+	}
+	if err := pingClient(ctx, "output consumer", outputConsumer); err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 3)
 	go func() {
-		if err := txSession.HandleFetches(ctx); err != nil {
-			log.Fatalln(err)
+		if err := session.HandleFetches(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			errCh <- fmt.Errorf("handle group transaction fetches: %w", err)
 		}
 	}()
-
 	go func() {
-		if err := outputConsumer.HandleFetches(ctx); err != nil {
-			log.Fatalln(err)
+		if err := outputConsumer.HandleFetches(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			errCh <- fmt.Errorf("handle output fetches: %w", err)
 		}
 	}()
 
-	http.HandleFunc("/group-tx", produceInputHandler)
-	http.HandleFunc("/group-tx-error", produceInputErrorHandler)
-	http.HandleFunc("/group-tx-panic", produceInputPanicHandler)
-	http.Handle("/metrics", promhttp.Handler())
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /eos", eosHandler(inputProducer))
+	mux.HandleFunc("POST /eos-error", eosSpecialHandler(inputProducer, forcedHandlerErrorID))
+	mux.HandleFunc("POST /eos-panic", eosSpecialHandler(inputProducer, forcedHandlerPanicID))
 
-	if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-		log.Fatalln("unable to start web server:", err)
+	server := &http.Server{
+		Addr:              httpAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go serveHTTP(server, errCh)
+
+	log.Printf("HTTP server listening on http://%s", httpAddr)
+
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		stop()
+		return err
+	}
+
+	return shutdownHTTPServer(server)
+}
+
+func serveHTTP(server *http.Server, errCh chan<- error) {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		errCh <- fmt.Errorf("serve HTTP: %w", err)
 	}
 }
 
-func newGroupTransactSession() (*xkafka.GroupTransactSession, error) {
-	return xkafka.NewGroupTransactSession(
-		xkafka.WithConfig(&xkafka.Config{
-			Enabled: true,
-			Brokers: brokers,
-			Topics:  inputTopic,
-			Group:   group,
+func shutdownHTTPServer(server *http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-			DefaultProduceTopic: outputTopic,
-			TransactionalID:     transactionalID,
+	if err := server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown HTTP server: %w", err)
+	}
 
-			MaxPollRecords: messagesCount,
-		}),
-		xkafka.WithClientID("eos-session"),
-		xkafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
-		xkafka.WithGroupTransactSessionBatchHandler(func(
-			ctx context.Context,
-			records []*kgo.Record,
-			tx *xkafka.Tx,
-		) error {
-			fmt.Printf("group tx consume batch: records=%d\n", len(records))
+	return nil
+}
 
-			for _, record := range records {
-				var input InputMessage
-				if err := json.Unmarshal(record.Value, &input); err != nil {
-					return err
-				}
+func (p *processor) handle(ctx context.Context, records []*kgo.Record, tx *xkafka.Tx) error {
+	fmt.Printf("eos process: records=%d\n", len(records))
 
-				if input.ID == 888 {
-					return fmt.Errorf("forced group transaction handler error")
-				}
+	for _, record := range records {
+		var input inputMessage
+		if err := json.Unmarshal(record.Value, &input); err != nil {
+			return fmt.Errorf("decode input record: %w", err)
+		}
 
-				if input.ID == 444 {
-					panic("forced group transaction handler panic")
-				}
+		attempt := 1
+		if input.ID == forcedHandlerErrorID || input.ID == forcedHandlerPanicID {
+			attempt = p.nextAttempt(record)
+		}
+		output := outputMessage{
+			ID:      input.ID,
+			Source:  record.Topic,
+			Attempt: attempt,
+		}
 
-				output := OutputMessage{
-					ID:        input.ID,
-					Source:    record.Topic,
-					Processed: true,
-				}
+		payload, err := json.Marshal(output)
+		if err != nil {
+			return fmt.Errorf("encode output record: %w", err)
+		}
 
-				payload, err := json.Marshal(&output)
-				if err != nil {
-					return err
-				}
+		if err := tx.ProduceSync(ctx, &kgo.Record{
+			Key:   record.Key,
+			Value: payload,
+		}); err != nil {
+			return fmt.Errorf("produce output record: %w", err)
+		}
 
-				if err := tx.ProduceSync(ctx, &kgo.Record{
-					Topic: outputTopic,
-					Key:   record.Key,
-					Value: payload,
-				}); err != nil {
-					return err
-				}
+		fmt.Printf(
+			"  input: topic=%s partition=%d offset=%d key=%q id=%d attempt=%d\n",
+			record.Topic,
+			record.Partition,
+			record.Offset,
+			record.Key,
+			input.ID,
+			attempt,
+		)
+
+		if attempt == 1 {
+			switch input.ID {
+			case forcedHandlerErrorID:
+				return errors.New("forced group transaction handler error")
+			case forcedHandlerPanicID:
+				panic("forced group transaction handler panic")
 			}
+		}
+	}
 
-			return nil
-		}),
-	)
+	return nil
 }
 
-func newOutputConsumer() (*xkafka.Client, error) {
-	return xkafka.NewClient(
-		xkafka.WithConfig(&xkafka.Config{
-			Enabled: true,
-			Brokers: brokers,
-			Topics:  outputTopic,
-			Group:   outputGroup,
-		}),
-		xkafka.WithClientID("eos-output-consumer"),
-		xkafka.WithFetchIsolationLevel(kgo.ReadCommitted()),
-		xkafka.WithConsumerBatchHandler(func(_ context.Context, records []*kgo.Record) error {
-			for _, record := range records {
-				var msg OutputMessage
-				if err := json.Unmarshal(record.Value, &msg); err != nil {
-					return err
-				}
+func (p *processor) nextAttempt(record *kgo.Record) int {
+	id := recordID{
+		topic:     record.Topic,
+		partition: record.Partition,
+		offset:    record.Offset,
+	}
+	p.attempts[id]++
 
-				fmt.Printf("output consume: topic=%s, partition=%d, offset=%d, msg=%+v\n",
-					record.Topic,
-					record.Partition,
-					record.Offset,
-					msg,
-				)
+	return p.attempts[id]
+}
+
+func handleOutputRecords(_ context.Context, records []*kgo.Record) error {
+	for _, record := range records {
+		var msg outputMessage
+		if err := json.Unmarshal(record.Value, &msg); err != nil {
+			return fmt.Errorf("decode output record: %w", err)
+		}
+
+		fmt.Printf(
+			"eos output: topic=%s partition=%d offset=%d key=%q msg=%+v\n",
+			record.Topic,
+			record.Partition,
+			record.Offset,
+			record.Key,
+			msg,
+		)
+	}
+
+	return nil
+}
+
+func eosHandler(producer *xkafka.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start, err := decodeInputMessage(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		records := make([]*kgo.Record, 0, messageCount)
+		for i := range messageCount {
+			record, err := newInputRecord(inputMessage{ID: start.ID + i})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
+			records = append(records, record)
+		}
 
-			return nil
-		}),
-	)
+		if err := producer.ProduceSync(r.Context(), records...); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, "published %d EOS input records\n", len(records))
+	}
 }
 
-func getenv(name, fallback string) string {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
+func eosSpecialHandler(producer *xkafka.Client, id int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		record, err := newInputRecord(inputMessage{ID: id})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	return value
+		if err := producer.ProduceSync(r.Context(), record); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, "published EOS input record id=%d\n", id)
+	}
 }
 
-func getenvInt(name string, fallback int) int {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
+func decodeInputMessage(r *http.Request) (inputMessage, error) {
+	var msg inputMessage
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		return inputMessage{}, fmt.Errorf("decode request: %w", err)
 	}
 
-	parsed, err := strconv.Atoi(value)
+	return msg, nil
+}
+
+func newInputRecord(msg inputMessage) (*kgo.Record, error) {
+	payload, err := json.Marshal(msg)
 	if err != nil {
-		log.Fatalf("invalid %s: %v", name, err)
+		return nil, fmt.Errorf("encode input message: %w", err)
 	}
 
-	if parsed < 0 {
-		log.Fatalf("%s must be greater than or equal to zero", name)
+	return &kgo.Record{
+		Key:   []byte(strconv.Itoa(msg.ID)),
+		Value: payload,
+	}, nil
+}
+
+func pingClient(ctx context.Context, name string, client *xkafka.Client) error {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(pingCtx); err != nil {
+		return fmt.Errorf("ping %s: %w", name, err)
 	}
 
-	return parsed
+	return nil
+}
+
+func pingSession(ctx context.Context, name string, session *xkafka.GroupTransactSession) error {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := session.Ping(pingCtx); err != nil {
+		return fmt.Errorf("ping %s: %w", name, err)
+	}
+
+	return nil
+}
+
+func shutdownClient(name string, client *xkafka.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Shutdown(ctx); err != nil {
+		log.Printf("shutdown %s: %v", name, err)
+	}
+}
+
+func shutdownSession(name string, session *xkafka.GroupTransactSession) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := session.Shutdown(ctx); err != nil {
+		log.Printf("shutdown %s: %v", name, err)
+	}
 }

@@ -1,95 +1,212 @@
 version: "3"
 
 vars:
-  LINTER_VER: "v2.12.2"
+  LINTER_VER: "v2.13.1"
+
   GOMODCACHE:
     sh: go env GOMODCACHE
+
   GOCACHE:
     sh: go env GOCACHE
-  PWD_DIR:
-    sh: pwd
+
+  GOSUMCACHE:
+    sh: echo "$(go env GOPATH)/pkg/sumdb"
+
+  # Root module + all local submodules that are part of the project.
+  # Examples are included because they depend on unpublished local modules.
+  MODULE_DIRS:
+    sh: |
+      {
+        printf '.\n'
+        find ./extra ./examples ./tests -name go.mod -type f -print 2>/dev/null |
+          while IFS= read -r mod; do
+            dirname "$mod"
+          done
+      } | sort -u
+
+  # Coverage is aggregated for production modules only. Example and behavioral
+  # test modules are still linted and tested; behavioral tests also contribute
+  # coverage to the root xkafka module.
+  COVERAGE_MODULE_DIRS:
+    sh: |
+      {
+        printf '.\n'
+        find ./extra -name go.mod -type f -print 2>/dev/null |
+          while IFS= read -r mod; do
+            dirname "$mod"
+          done
+      } | sort -u | tr '\n' ' '
 
 env:
-  GOWORK: "off"
+  # The workspace resolves unpublished local modules, including examples,
+  # against the current checkout instead of released module versions.
+  GOWORK: "{{.ROOT_DIR}}/go.work"
 
 tasks:
-  run:
-    desc: "Full cycle"
+  init-workspace:
+    desc: "Initialize or reset the local Go workspace"
     cmds:
-      - task: vendor-root
-      - task: lint-root
-      - task: test-root
+      - bash .github/scripts/create-go-workspace.sh --with-examples
 
-  before-commit:
-    desc: "Run example checks and full cycle"
+  run:
+    desc: "Run lint and race tests for all modules"
     cmds:
-      - task: check-examples
-      - task: run
+      - task: lint
+      - task: test-race
 
   lint:
-    desc: "Lint root module"
+    desc: "Lint all modules"
     cmds:
-      - task: vendor-root
-      - task: lint-root
+      - for: { var: MODULE_DIRS }
+        task: _run-linter
+        vars:
+          WORK_DIR: "/app/{{.ITEM}}"
 
   test:
-    desc: "Test root module"
+    desc: "Run tests for all modules"
     cmds:
-      - task: vendor-root
-      - task: test-root
+      - for: { var: MODULE_DIRS }
+        task: _run-tests
+        vars:
+          WORK_DIR: "{{.ITEM}}"
 
-  check-examples:
-    desc: "Check example modules"
+  test-race:
+    desc: "Run tests with the race detector for all modules"
+    cmds:
+      - for: { var: MODULE_DIRS }
+        task: _run-race-tests
+        vars:
+          WORK_DIR: "{{.ITEM}}"
+
+  coverage:
+    desc: "Run tests and print total coverage for production modules"
     cmds:
       - |
-        set -e
+        set -eu
 
-        find ./examples -name go.mod -print | sort | while IFS= read -r mod; do
-          dir="$(dirname "$mod")"
-          echo "==> $dir"
+        root="{{.ROOT_DIR}}"
+        output="$root/coverage.out"
+        profiles="$(mktemp -d)"
 
+        cleanup() {
+          rm -rf "$profiles"
+        }
+        trap cleanup EXIT
+
+        printf 'mode: atomic\n' > "$output"
+
+        for module in {{.COVERAGE_MODULE_DIRS}}; do
+          echo "==> $module"
+
+          if [ "$module" = "." ]; then
+            root_profile="$profiles/root.out"
+            behavior_profile="$profiles/behavior.out"
+            merged_profile="$profiles/root-merged.out"
+
+            (
+              cd "$root"
+              GOWORK="$root/go.work" go test \
+                -mod=readonly \
+                -count=1 \
+                -covermode=atomic \
+                -coverpkg=github.com/mkbeh/xkafka \
+                -coverprofile="$root_profile" \
+                ./...
+            )
+
+            (
+              cd "$root/tests"
+              GOWORK="$root/go.work" go test \
+                -mod=readonly \
+                -count=1 \
+                -covermode=atomic \
+                -coverpkg=github.com/mkbeh/xkafka \
+                -coverprofile="$behavior_profile" \
+                ./...
+            )
+
+            {
+              printf 'mode: atomic\n'
+              awk '
+                FNR == 1 { next }
+                {
+                  key = $1 " " $2
+                  counts[key] += $3
+                }
+                END {
+                  for (key in counts) {
+                    print key, counts[key]
+                  }
+                }
+              ' "$root_profile" "$behavior_profile" | sort
+            } > "$merged_profile"
+
+            tail -n +2 "$merged_profile" >> "$output"
+            continue
+          fi
+
+          profile="$profiles/$(printf '%s' "$module" | tr '/.' '__').out"
           (
-            cd "$dir"
-            rm -rf vendor
-            go get ./...
-            go mod tidy -v
-            go mod vendor
-            go test ./...
+            cd "$root/$module"
+            GOWORK="$root/go.work" go test \
+              -mod=readonly \
+              -count=1 \
+              -covermode=atomic \
+              -coverprofile="$profile" \
+              ./...
           )
+
+          tail -n +2 "$profile" >> "$output"
         done
 
-  vendor-root:
-    desc: "Vendor root module"
-    cmds:
-      - rm -rf vendor
-      - go mod tidy -v
-      - go mod vendor
+        GOWORK="$root/go.work" go tool cover -func="$output" | grep total
 
-  lint-root:
-    desc: "Lint root module"
+  coverage:html:
+    desc: "Generate HTML coverage report"
+    deps:
+      - coverage
     cmds:
-      - task: _run-linter
-        vars:
-          WORK_DIR: /app
+      - go tool cover -html=coverage.out -o coverage.html
 
-  test-root:
-    desc: "Test root module"
+  _run-tests:
+    internal: true
+    requires:
+      vars:
+        - WORK_DIR
+    dir: "{{.ROOT_DIR}}/{{.WORK_DIR}}"
     cmds:
-      - go test -mod=vendor -race -v -count=1 ./...
+      - echo "==> {{.WORK_DIR}}"
+      - go test -mod=readonly -v -count=1 ./...
+
+  _run-race-tests:
+    internal: true
+    requires:
+      vars:
+        - WORK_DIR
+    dir: "{{.ROOT_DIR}}/{{.WORK_DIR}}"
+    cmds:
+      - echo "==> {{.WORK_DIR}}"
+      - go test -mod=readonly -race -v -count=1 ./...
 
   _run-linter:
-    desc: "Run golangci-lint in Docker"
+    internal: true
+    requires:
+      vars:
+        - WORK_DIR
     cmds:
+      - echo "==> {{.WORK_DIR}}"
+      - mkdir -p "{{.GOSUMCACHE}}"
       - >
         docker run --rm
         -u $(id -u):$(id -g)
-        -v {{.PWD_DIR}}:/app
+        -v {{.ROOT_DIR}}:/app
         -v {{.GOMODCACHE}}:/go/pkg/mod
+        -v {{.GOSUMCACHE}}:/go/pkg/sumdb
         -v {{.GOCACHE}}:/go/build-cache
         -e GOMODCACHE=/go/pkg/mod
         -e GOCACHE=/go/build-cache
         -e GOLANGCI_LINT_CACHE=/go/build-cache/golangci-lint
-        -e GOWORK=off
+        -e GOWORK=/app/go.work
         -w {{.WORK_DIR}}
         golangci/golangci-lint:{{.LINTER_VER}}
-        golangci-lint run --timeout 5m --fix --modules-download-mode vendor
+        golangci-lint run --timeout 5m --modules-download-mode readonly

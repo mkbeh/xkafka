@@ -3,283 +3,264 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/mkbeh/xkafka"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 const (
-	defaultMessagesCount          = 30
-	defaultConsumersCount         = 4
-	defaultMaxRecords             = 5
-	defaultRejectAfterDeliveries  = 3
-	defaultReleaseTimeout         = 5 * time.Second
-	defaultHandlerProcessingDelay = 500 * time.Millisecond
+	brokers               = "localhost:29092"
+	topic                 = "sample-share-topic"
+	group                 = "sample-share-group"
+	httpAddr              = "localhost:8080"
+	consumerCount         = 3
+	messageCount          = 12
+	maxRecords            = 2
+	rejectAfterDeliveries = 3
+	releaseTimeout        = time.Second
+	consumerPollInterval  = 100 * time.Millisecond
+	forcedHandlerErrorID  = 888
+	forcedHandlerPanicID  = 444
 )
 
-var (
-	producer  *xkafka.Client
-	consumers []*xkafka.Client
-)
-
-var (
-	brokers string
-
-	topic                 string
-	group                 string
-	consumersCount        int
-	messagesCount         int
-	maxRecords            int32
-	releaseTimeout        time.Duration
-	rejectAfterDeliveries int32
-)
-
-func init() {
-	brokers = os.Getenv("BROKERS")
-
-	topic = getenv("SHARE_TOPIC", "sample-share-topic")
-	group = getenv("SHARE_GROUP", "sample-share-group")
-	consumersCount = int(getenvInt32("SHARE_CONSUMERS", defaultConsumersCount))
-	messagesCount = int(getenvInt32("SHARE_MESSAGES", defaultMessagesCount))
-	maxRecords = getenvInt32("SHARE_MAX_RECORDS", defaultMaxRecords)
-
-	releaseTimeout = getenvDuration("SHARE_RELEASE_TIMEOUT", defaultReleaseTimeout)
-	rejectAfterDeliveries = getenvInt32(
-		"SHARE_REJECT_AFTER_DELIVERIES",
-		defaultRejectAfterDeliveries,
-	)
-}
-
-type Message struct {
+type message struct {
 	ID int `json:"id"`
 }
 
-func produceHandler(w http.ResponseWriter, r *http.Request) {
-	var msg Message
+func main() {
+	if err := run(); err != nil {
+		log.Fatalln(err)
+	}
+}
 
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	producer, err := xkafka.NewClient(
+		xkafka.WithName("share-producer"),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.DefaultProduceTopic(topic),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("create share producer: %w", err)
+	}
+	defer shutdownClient("share producer", producer)
+
+	if err := pingClient(ctx, "share producer", producer); err != nil {
+		return err
 	}
 
-	records := make([]*kgo.Record, 0, messagesCount)
+	errCh := make(chan error, consumerCount+1)
 
-	for i := 0; i < messagesCount; i++ {
-		message := Message{
-			ID: msg.ID + i,
+	for i := 1; i <= consumerCount; i++ {
+		consumer, err := newShareConsumer(i)
+		if err != nil {
+			return fmt.Errorf("create share consumer %d: %w", i, err)
 		}
 
-		payload, err := json.Marshal(&message)
+		name := fmt.Sprintf("share consumer %d", i)
+		defer shutdownClient(name, consumer)
+
+		if err := pingClient(ctx, name, consumer); err != nil {
+			return err
+		}
+
+		go func() {
+			if err := consumer.HandleFetches(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				errCh <- fmt.Errorf("%s: handle kafka fetches: %w", name, err)
+			}
+		}()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /share", shareHandler(producer))
+	mux.HandleFunc("POST /share-error", shareSpecialHandler(producer, forcedHandlerErrorID))
+	mux.HandleFunc("POST /share-panic", shareSpecialHandler(producer, forcedHandlerPanicID))
+
+	server := &http.Server{
+		Addr:              httpAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go serveHTTP(server, errCh)
+
+	log.Printf("HTTP server listening on http://%s", httpAddr)
+
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		stop()
+		return err
+	}
+
+	return shutdownHTTPServer(server)
+}
+
+func serveHTTP(server *http.Server, errCh chan<- error) {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		errCh <- fmt.Errorf("serve HTTP: %w", err)
+	}
+}
+
+func shutdownHTTPServer(server *http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown HTTP server: %w", err)
+	}
+
+	return nil
+}
+
+func newShareConsumer(index int) (*xkafka.Client, error) {
+	name := fmt.Sprintf("share-consumer-%d", index)
+
+	return xkafka.NewClient(
+		xkafka.WithName(name),
+		xkafka.WithKafkaOptions(
+			kgo.SeedBrokers(brokers),
+			kgo.ConsumeTopics(topic),
+			kgo.ShareGroup(group),
+			kgo.ShareMaxRecords(maxRecords),
+			kgo.ShareMaxRecordsStrict(),
+		),
+		xkafka.WithPollInterval(consumerPollInterval),
+		xkafka.WithShareRejectAfterDeliveries(rejectAfterDeliveries),
+		xkafka.WithShareReleaseTimeout(releaseTimeout),
+		xkafka.WithBatchHandler(shareBatchHandler(name)),
+	)
+}
+
+func shareBatchHandler(consumerName string) xkafka.BatchHandlerFunc {
+	return func(_ context.Context, records []*kgo.Record) error {
+		fmt.Printf("share consume: client=%s records=%d\n", consumerName, len(records))
+
+		for _, record := range records {
+			var msg message
+			if err := json.Unmarshal(record.Value, &msg); err != nil {
+				return fmt.Errorf("decode record: %w", err)
+			}
+
+			fmt.Printf(
+				"  record: topic=%s partition=%d offset=%d delivery_count=%d key=%q msg=%+v\n",
+				record.Topic,
+				record.Partition,
+				record.Offset,
+				record.DeliveryCount(),
+				record.Key,
+				msg,
+			)
+
+			switch msg.ID {
+			case forcedHandlerErrorID:
+				return errors.New("forced share handler error")
+			case forcedHandlerPanicID:
+				panic("forced share handler panic")
+			}
+		}
+
+		return nil
+	}
+}
+
+func shareHandler(producer *xkafka.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start, err := decodeMessage(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		records := make([]*kgo.Record, 0, messageCount)
+		for i := range messageCount {
+			record, err := newRecord(message{ID: start.ID + i})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			records = append(records, record)
+		}
+
+		if err := producer.ProduceSync(r.Context(), records...); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, "published %d share records\n", len(records))
+	}
+}
+
+func shareSpecialHandler(producer *xkafka.Client, id int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		record, err := newRecord(message{ID: id})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		records = append(records, &kgo.Record{
-			Topic: topic,
-			Key:   []byte(strconv.Itoa(message.ID)),
-			Value: payload,
-		})
-	}
-
-	if err := producer.ProduceSync(r.Context(), records...); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintf(w, "published %d share messages\n", len(records))
-}
-
-func produceErrorHandler(w http.ResponseWriter, r *http.Request) {
-	msg := Message{ID: 888}
-
-	payload, err := json.Marshal(&msg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := producer.ProduceSync(r.Context(), &kgo.Record{
-		Topic: topic,
-		Key:   []byte(strconv.Itoa(msg.ID)),
-		Value: payload,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "share error message published")
-}
-
-func producePanicHandler(w http.ResponseWriter, r *http.Request) {
-	msg := Message{ID: 444}
-
-	payload, err := json.Marshal(&msg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := producer.ProduceSync(r.Context(), &kgo.Record{
-		Topic: topic,
-		Key:   []byte(strconv.Itoa(msg.ID)),
-		Value: payload,
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "share panic message published")
-}
-
-func main() {
-	ctx := context.Background()
-
-	var err error
-
-	producer, err = xkafka.NewClient(
-		xkafka.WithConfig(&xkafka.Config{
-			Brokers: brokers,
-		}),
-		xkafka.WithClientID("share-producer"),
-	)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer producer.Shutdown(ctx)
-
-	for i := 1; i <= consumersCount; i++ {
-		consumer, err := newConsumer(i)
-		if err != nil {
-			log.Fatalln(err)
+		if err := producer.ProduceSync(r.Context(), record); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
-		go func() {
-			if err := consumer.HandleFetches(ctx); err != nil {
-				log.Fatalln(err)
-			}
-		}()
-
-		consumers = append(consumers, consumer)
-	}
-
-	defer func() {
-		for _, consumer := range consumers {
-			if err := consumer.Shutdown(ctx); err != nil {
-				log.Println(err)
-			}
-		}
-	}()
-
-	http.HandleFunc("/share", produceHandler)
-	http.HandleFunc("/share-error", produceErrorHandler)
-	http.HandleFunc("/share-panic", producePanicHandler)
-	http.Handle("/metrics", promhttp.Handler())
-
-	if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-		log.Fatalln("unable to start web server:", err)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, "published share record id=%d\n", id)
 	}
 }
 
-func newConsumer(index int) (*xkafka.Client, error) {
-	clientID := fmt.Sprintf("sample-share-client-%d", index)
-
-	return xkafka.NewClient(
-		xkafka.WithConfig(&xkafka.Config{
-			Enabled: true,
-			Brokers: brokers,
-			Topics:  topic,
-
-			MaxPollRecords:  int(maxRecords),
-			ShareGroup:      group,
-			ShareMaxRecords: maxRecords,
-
-			ShareReleaseTimeout:        releaseTimeout,
-			ShareRejectAfterDeliveries: rejectAfterDeliveries,
-		}),
-		xkafka.WithClientID(clientID),
-		xkafka.WithShareGroupBatchHandler(func(_ context.Context, records []*kgo.Record) error {
-			fmt.Printf("share consume: client_id=%s, records=%d\n", clientID, len(records))
-
-			time.Sleep(defaultHandlerProcessingDelay)
-
-			for _, record := range records {
-				var msg Message
-				if err := json.Unmarshal(record.Value, &msg); err != nil {
-					return err
-				}
-
-				fmt.Printf(
-					"  record: client_id=%s, topic=%s, partition=%d, offset=%d, delivery_count=%d, msg=%+v\n",
-					clientID,
-					record.Topic,
-					record.Partition,
-					record.Offset,
-					record.DeliveryCount(),
-					msg,
-				)
-
-				if msg.ID == 888 {
-					return fmt.Errorf("forced share handler error")
-				}
-
-				if msg.ID == 444 {
-					panic("forced share handler panic")
-				}
-			}
-
-			return nil
-		}),
-	)
-}
-
-func getenv(name, fallback string) string {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
+func decodeMessage(r *http.Request) (message, error) {
+	var msg message
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		return message{}, fmt.Errorf("decode request: %w", err)
 	}
 
-	return value
+	return msg, nil
 }
 
-func getenvInt32(name string, fallback int32) int32 {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseInt(value, 10, 32)
+func newRecord(msg message) (*kgo.Record, error) {
+	payload, err := json.Marshal(msg)
 	if err != nil {
-		log.Fatalf("invalid %s: %v", name, err)
+		return nil, fmt.Errorf("encode message: %w", err)
 	}
 
-	if parsed < 0 {
-		log.Fatalf("%s must be greater than or equal to zero", name)
-	}
-
-	return int32(parsed)
+	return &kgo.Record{
+		Key:   []byte(strconv.Itoa(msg.ID)),
+		Value: payload,
+	}, nil
 }
 
-func getenvDuration(name string, fallback time.Duration) time.Duration {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
+func pingClient(ctx context.Context, name string, client *xkafka.Client) error {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(pingCtx); err != nil {
+		return fmt.Errorf("ping %s: %w", name, err)
 	}
 
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		log.Fatalf("invalid %s: %v", name, err)
-	}
+	return nil
+}
 
-	return parsed
+func shutdownClient(name string, client *xkafka.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Shutdown(ctx); err != nil {
+		log.Printf("shutdown %s: %v", name, err)
+	}
 }

@@ -1,46 +1,22 @@
 # Share Group Example
 
-This example shows how to use `xkafka` with Kafka Share Groups.
+This example demonstrates how to use Kafka Share Groups (KIP-932) to distribute and process records concurrently with
+queue-like delivery semantics.
 
 **This example demonstrates:**
 
-* share group consumption with the batch handler API;
-* batch size control through `MaxPollRecords` and `ShareMaxRecords`;
-* `AckAccept` on successful handling;
-* `AckRelease` on handler errors;
-* `AckReject` after delivery count limit;
-* release timeout before redelivery;
-* Prometheus metrics.
-
-## Configuration
-
-Configure Kafka connection using environment variables:
-
-```text
-BROKERS=localhost:29092
-
-SHARE_TOPIC=sample-share-topic
-SHARE_GROUP=sample-share-group
-SHARE_CONSUMERS=4
-SHARE_MESSAGES=30
-SHARE_MAX_RECORDS=5
-
-SHARE_REJECT_AFTER_DELIVERIES=3
-SHARE_RELEASE_TIMEOUT=2s
-```
-
-`SHARE_MAX_RECORDS` controls the batch size. Set it to `1` to get single-record style processing through the same
-batch handler API.
+* **Scaling concurrent consumption** across multiple consumers in a single Share Group
+* **Accepting successfully processed records** so they are not delivered again
+* **Redelivering failed records** so another processing attempt can be made
+* **Handling poison records** by rejecting them after repeated processing failures
 
 ## Local Kafka setup
-
-Examples can use the local Kafka setup from `examples/docker-compose.yml`.
 
 From the repository root:
 
 ```shell
 docker compose -f examples/docker-compose.yml up -d
-````
+```
 
 Or from this example directory:
 
@@ -60,12 +36,14 @@ Redpanda Console is available at:
 http://localhost:18080
 ```
 
+The example uses the `sample-share-topic` topic created by the local Kafka setup.
+
 ## Run
 
 From this directory:
 
 ```shell
-go run main.go
+go run .
 ```
 
 Or from the repository root:
@@ -74,134 +52,122 @@ Or from the repository root:
 go run ./examples/share_group
 ```
 
-The HTTP server starts on:
+The HTTP server listens on:
 
 ```text
-localhost:8080
+http://localhost:8080
 ```
 
-## Produce to ShareGroup topic
+Start the example before publishing records so the Share Group consumers are
+already polling when new records arrive.
 
-Sends messages to a topic consumed by several share consumers.
+## Process records via Share Group
+
+The `POST /share` endpoint publishes 12 records starting from the provided ID. The records are then distributed across
+multiple consumers in the same Kafka Share Group.
 
 ```shell
-curl -X POST 'localhost:8080/share' \
+curl -i -X POST 'http://localhost:8080/share' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": 700
-  }'
+  -d '{"id":700}'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+published 12 share records
+```
+
+### Example log
+
+In this example, 3 active consumers process records from the Share Group in batches of up to 2 records.
+
+Because records can be distributed across consumers independently, consumer assignment and delivery order can vary
+between runs:
 
 ```text
-HTTP 202
-messages are visible to share consumers
+share consume: client=share-consumer-2 records=2
+  record: topic=sample-share-topic delivery_count=1 key="701" msg={ID:701}
+  record: topic=sample-share-topic delivery_count=1 key="709" msg={ID:709}
+...
 ```
 
-Example log:
+## Release and redeliver on error
 
-```text
-share consume: client_id=sample-share-client-1, records=5
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=60, delivery_count=1, msg={ID:700}
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=0, offset=44, delivery_count=1, msg={ID:701}
-
-share consume: client_id=sample-share-client-2, records=5
-  record: client_id=sample-share-client-2, topic=sample-share-topic, partition=1, offset=12, delivery_count=1, msg={ID:705}
-```
-
-Successful records are acknowledged with `AckAccept`.
-
-## Produce failing ShareGroup message
-
-Sends one message with `id=888`.
-
-The share handler intentionally returns an error for this message.
+The `POST /share-error` endpoint publishes a single record with ID `888`. The consumer handler intentionally returns an
+error during processing, causing the record to be released for redelivery.
 
 ```shell
-curl -X POST 'localhost:8080/share-error'
+curl -i -X POST 'http://localhost:8080/share-error'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+published share record id=888
+```
+
+### Example log
+
+When the handler returns an error, records that have not reached the configured delivery threshold are released back to
+the Share Group and can be delivered again with an incremented delivery count.
+
+In this example, released acknowledgements are flushed after a one-second delay. The record is retried until its
+delivery count reaches the configured threshold of three:
 
 ```text
-HTTP 202
-the same record is redelivered until delivery count reaches the reject limit
+share consume: client=share-consumer-2 records=1
+  record: topic=sample-share-topic delivery_count=1 key="888" msg={ID:888}
+share consume: client=share-consumer-1 records=1
+  record: topic=sample-share-topic delivery_count=2 key="888" msg={ID:888}
+share consume: client=share-consumer-3 records=1
+  record: topic=sample-share-topic delivery_count=3 key="888" msg={ID:888}
 ```
 
-Expected log pattern:
+Consumer assignment can vary between redeliveries.
 
-```text
-share consume: client_id=sample-share-client-1, records=1
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=23, delivery_count=1, msg={ID:888}
-ERROR error handling share group records error="forced share handler error"
-```
+> **Note:** On the third failed delivery, the record is rejected instead of being released again.
 
-## Produce panic Share Group message
+## Release and redeliver on panic
 
-Sends one message with `id=444`.
-
-The share handler intentionally panics for this message.
+The `POST /share-panic` endpoint publishes a record with ID `444`. The consumer handler intentionally panics while
+processing the record.
 
 ```shell
-curl -X POST 'localhost:8080/share-panic'
+curl -i -X POST 'http://localhost:8080/share-panic'
 ```
 
-Expected result:
+### Expected response
 
-```text
-HTTP 202
-the panic is recovered and the record is handled through the share error ack flow
+```http
+HTTP/1.1 202 Accepted
+
+published share record id=444
 ```
 
-Expected log pattern:
+### Behavior
 
-```text
-share consume: client_id=sample-share-client-1, records=1
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=1, msg={ID:444}
-ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=release
+`xkafka` recovers from the handler panic and routes the affected batch through the same failure path as a handler error.
 
-share consume: client_id=sample-share-client-1, records=1
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=2, msg={ID:444}
-ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=release
+**The record follows the same delivery lifecycle:**
 
-share consume: client_id=sample-share-client-1, records=1
-  record: client_id=sample-share-client-1, topic=sample-share-topic, partition=2, offset=24, delivery_count=3, msg={ID:444}
-ERROR error handling records error="kafka: batch handler panic: forced share handler panic" ack_status=reject
-```
+* **Below the delivery threshold:** The record is released back to the Share Group and can be delivered again
+* **At the delivery threshold:** The record is rejected instead of being released again
 
-The panicking record is released for redelivery until the delivery count reaches the reject limit.
+## Stop services
 
-In a real system, poison records should eventually be handled with retry limits, a dead-letter topic, or another
-recovery policy.
-
-
-## Metrics
-
-Prometheus metrics are available at:
+From the repository root:
 
 ```shell
-curl 'http://localhost:8080/metrics'
+docker compose -f examples/docker-compose.yml down --remove-orphans -v
 ```
 
-Useful metrics for this example:
-
-```text
-kafka_produce_records_total
-kafka_produce_errors_total
-kafka_consume_handle_duration_seconds
-kafka_consume_errors_total
-kafka_fetch_records_total
-```
-
-Check produced records:
+Or from this example directory:
 
 ```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_produce_records_total'
-```
-
-Check records observed by share handlers:
-
-```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_consume_handle_duration_seconds_count'
+docker compose -f ../docker-compose.yml down --remove-orphans -v
 ```

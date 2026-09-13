@@ -1,7 +1,7 @@
 version: "2"
 
 run:
-  go: "1.26"
+  go: "1.27"
   timeout: 5m
   allow-parallel-runners: true
 
@@ -152,7 +152,12 @@ linters:
       - third_party/
       - builtin/
       - examples/
-      - tmp/
+      - _tmp/
+    rules:
+      - path: _test\.go
+        linters:
+          - revive
+        text: "dot-imports"
 
 issues:
   max-same-issues: 0
@@ -163,11 +168,12 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
   exclusions:
     generated: lax
     paths:
       - third_party/
       - builtin/
       - examples/
-      - tmp/
+      - _tmp/

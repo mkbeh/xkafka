@@ -1,42 +1,22 @@
-# EOS Processing Example
+# Exactly-Once (EOS) Example
 
-This example shows Kafka-to-Kafka exactly-once processing with `GroupTransactSession`.
+This example demonstrates how to build Kafka-to-Kafka exactly-once processing workflows.
 
 **This example demonstrates:**
 
-* producing records to an input topic;
-* consuming input records with `GroupTransactSession`;
-* producing transformed records to an output topic inside the same Kafka transaction;
-* committing produced records and consumed offsets atomically;
-* consuming output records with `ReadCommitted`;
-* aborting a transaction when the handler returns an error;
-* aborting a transaction when the handler panics;
-* Prometheus metrics.
-
-## Configuration
-
-Configure Kafka connection using environment variables:
-
-```text
-BROKERS=localhost:29092
-
-EOS_INPUT_TOPIC=sample-eos-input-topic
-EOS_OUTPUT_TOPIC=sample-eos-output-topic
-EOS_GROUP=sample-eos-group
-EOS_OUTPUT_GROUP=sample-eos-output-group
-EOS_TRANSACTIONAL_ID=sample-eos-session
-EOS_MESSAGES=10
-```
+* **Publishing input records** to an upstream Kafka topic
+* **Processing records transactionally** by consuming, transforming, and producing records in a single transaction
+* **Committing atomically** so produced records and consumed offsets are committed together
+* **Reading only committed output** from downstream consumers
+* **Recovering from failures** by aborting transactions and retrying after handler errors or panics
 
 ## Local Kafka setup
-
-Examples can use the local Kafka setup from `examples/docker-compose.yml`.
 
 From the repository root:
 
 ```shell
 docker compose -f examples/docker-compose.yml up -d
-````
+```
 
 Or from this example directory:
 
@@ -56,12 +36,15 @@ Redpanda Console is available at:
 http://localhost:18080
 ```
 
+The example uses the `sample-eos-input-topic` and `sample-eos-output-topic` topics
+created by the local Kafka setup.
+
 ## Run
 
 From this directory:
 
 ```shell
-go run main.go
+go run .
 ```
 
 Or from the repository root:
@@ -70,121 +53,121 @@ Or from the repository root:
 go run ./examples/eos
 ```
 
-The HTTP server starts on:
+The HTTP server listens on:
 
 ```text
-localhost:8080
+http://localhost:8080
 ```
 
-## Produce input records
+## Process records exactly once (EOS)
 
-Sends records to the input topic. The group transact session consumes them and produces transformed records to the
-output topic transactionally.
+The `POST /eos` endpoint publishes 5 input records starting from the provided ID. Each consumed batch is transformed
+and written to the output topic within a Kafka transaction. The produced records and corresponding consumed offsets are
+committed atomically.
 
 ```shell
-curl -X POST 'localhost:8080/group-tx' \
+curl -i -X POST 'http://localhost:8080/eos' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": 100
-  }'
+  -d '{"id":100}'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+published 5 EOS input records
+```
+
+### Example log
+
+The logs show records being processed from the input topic and the committed results appearing on the output topic:
 
 ```text
-HTTP 202
-records are visible in the output topic after the group transaction commits
+  input: topic=sample-eos-input-topic key="100" id=100 attempt=1
+...
+eos output: topic=sample-eos-output-topic key="100" msg={ID:100 Source:sample-eos-input-topic Attempt:1}
+...
 ```
 
-Example log:
+## Abort and retry on handler error
 
-```text
-group tx consume batch: records=10
-output consume: topic=sample-eos-output-topic, partition=0, offset=0, msg={ID:100 Source:sample-eos-input-topic Processed:true}
-output consume: topic=sample-eos-output-topic, partition=0, offset=1, msg={ID:101 Source:sample-eos-input-topic Processed:true}
-```
-
-## Produce failing input records
-
-Sends two input records: one valid record followed by one poison record.
-
-The handler produces an output record for the valid input record first, then returns an error on the poison record.
-The group transaction is aborted, so produced output records are not committed and remain invisible to `ReadCommitted`
-consumers.
+The `POST /eos-error` endpoint publishes a single input record with ID `888`. During the first processing attempt, the
+handler produces an output record inside the transaction and then intentionally returns an error.
 
 ```shell
-curl -X POST 'localhost:8080/group-tx-error'
+curl -i -X POST 'http://localhost:8080/eos-error'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+published EOS input record id=888
+```
+
+### Example log
+
+Because the first attempt fails, `xkafka` automatically aborts the transaction, so neither the output record nor the
+consumed offset is committed. The input record is then redelivered and the second processing attempt succeeds:
 
 ```text
-HTTP 202
-the group transaction is aborted and output records are not committed
+eos process: records=1
+  input: topic=sample-eos-input-topic key="888" id=888 attempt=1
+eos process: records=1
+  input: topic=sample-eos-input-topic key="888" id=888 attempt=2
+eos output: topic=sample-eos-output-topic key="888" msg={ID:888 Source:sample-eos-input-topic Attempt:2}
+...
 ```
 
-Example log:
+> **Verification:** No output with `Attempt:1` appears because the first transaction was aborted and its output record
+> is not visible to the `read_committed` output consumer.
 
-```text
-group tx consume batch: records=2
-ERROR error handling records in group transaction error="forced group transaction handler error"
-```
+## Abort and retry on handler panic
 
-The same input records may be redelivered because consumed offsets are not committed when the transaction aborts.
-
-In a real system, poison records should eventually be handled with retry limits, a dead-letter topic, or another
-recovery policy.
-
-## Produce panic input record
-
-Sends one input record that intentionally panics in the group transact session handler.
+The `POST /eos-panic` endpoint publishes a single input record with ID `444`. During the first processing attempt, the
+handler produces an output record inside the transaction and then intentionally panics.
 
 ```shell
-curl -X POST 'localhost:8080/group-tx-panic'
+curl -i -X POST 'http://localhost:8080/eos-panic'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+published EOS input record id=444
+```
+
+### Example log
+
+`xkafka` automatically recovers from the handler panic and aborts the transaction, so neither the output record nor the
+consumed offset is committed. The input record is then redelivered and the second processing attempt succeeds:
 
 ```text
-HTTP 202
-the group transaction is aborted and the consumed offset is not committed
+eos process: records=1
+  input: topic=sample-eos-input-topic key="444" id=444 attempt=1
+eos process: records=1
+  input: topic=sample-eos-input-topic key="444" id=444 attempt=2
+eos output: topic=sample-eos-output-topic key="444" msg={ID:444 Source:sample-eos-input-topic Attempt:2}
+...
 ```
 
-Example log:
+> **Verification:** No output with `Attempt:1` appears because the first transaction was aborted and its output record
+> is not visible to the `read_committed` output consumer.
 
-```text
-group tx consume batch: records=1
-ERROR error handling records in group transaction error="kafka: batch handler panic: forced group transaction handler panic"
-```
+## Stop services
 
-The same input record may be redelivered because consumed offsets are not committed when the transaction aborts.
-
-## Metrics
-
-Prometheus metrics are available at:
+From the repository root:
 
 ```shell
-curl 'http://localhost:8080/metrics'
+docker compose -f examples/docker-compose.yml down --remove-orphans -v
 ```
 
-Useful metrics for this example:
-
-```text
-kafka_produce_records_total
-kafka_produce_errors_total
-kafka_consume_handle_duration_seconds
-kafka_consume_errors_total
-kafka_fetch_records_total
-```
-
-Check produced records:
+Or from this example directory:
 
 ```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_produce_records_total'
-```
-
-Check records observed by handlers:
-
-```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_consume_handle_duration_seconds_count'
+docker compose -f ../docker-compose.yml down --remove-orphans -v
 ```

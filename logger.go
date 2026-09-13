@@ -1,19 +1,24 @@
 package xkafka
 
-import (
-	"os"
-
-	"github.com/twmb/franz-go/pkg/kgo"
-)
+import "github.com/twmb/franz-go/pkg/kgo"
 
 const (
-	logKeyError          = "error"
-	logKeyTopic          = "topic"
-	logKeyRecord         = "record"
-	logKeyRecords        = "records"
-	logKeyConsumerLabels = "consumer_labels"
+	logKeyError         = "error"
+	logKeyTopic         = "topic"
+	logKeyPartition     = "partition"
+	logKeyRecord        = "record"
+	logKeyRecordCount   = "record_count"
+	logKeyConsumerGroup = "consumer_group"
 )
 
-func newDefaultLogger() kgo.Logger {
-	return kgo.BasicLogger(os.Stderr, kgo.LogLevelInfo, nil)
+func (c *client) logEnabled(level kgo.LogLevel) bool {
+	return c.logger != nil && c.logger.Level() >= level
+}
+
+func (c *client) log(level kgo.LogLevel, msg string, keyvals ...any) {
+	if !c.logEnabled(level) {
+		return
+	}
+
+	c.logger.Log(level, msg, keyvals...)
 }

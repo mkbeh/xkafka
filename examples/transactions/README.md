@@ -1,36 +1,22 @@
 # Transactions Example
 
-This example shows how to use `xkafka` producer transactions.
+This example demonstrates how to use Kafka transactions for atomic record publishing and consume only committed records.
 
 **This example demonstrates:**
 
-* transactional message publishing;
-* transaction commit;
-* transaction abort on error;
-* transaction abort on panic;
-* `read_committed` consumer behavior;
-* Prometheus metrics.
-
-## Configuration
-
-Configure Kafka connection using environment variables:
-
-```text
-BROKERS=localhost:29092
-TX_TOPIC=sample-tx-topic
-TX_GROUP=sample-tx-group
-TRANSACTIONAL_ID=sample-tx-producer
-```
+* **Creating a transactional producer** for atomic write operations
+* **Committing records atomically** within a transaction
+* **Aborting transactions on errors** returned from transactional processing
+* **Handling panics safely** by aborting the transaction before re-throwing the panic
+* **Reading only committed records** from a downstream consumer
 
 ## Local Kafka setup
-
-Examples can use the local Kafka setup from `examples/docker-compose.yml`.
 
 From the repository root:
 
 ```shell
 docker compose -f examples/docker-compose.yml up -d
-````
+```
 
 Or from this example directory:
 
@@ -50,12 +36,14 @@ Redpanda Console is available at:
 http://localhost:18080
 ```
 
+The example uses the `sample-tx-topic` topic created by the local Kafka setup.
+
 ## Run
 
 From this directory:
 
 ```shell
-go run main.go
+go run .
 ```
 
 Or from the repository root:
@@ -64,131 +52,94 @@ Or from the repository root:
 go run ./examples/transactions
 ```
 
-The HTTP server starts on:
+The HTTP server listens on:
 
 ```text
-localhost:8080
+http://localhost:8080
 ```
 
-## Produce transactionally
+## Commit a transaction
 
-Runs message publishing inside a Kafka transaction.
+The `POST /tx` endpoint publishes a record and commits it in a Kafka transaction.
 
 ```shell
-curl -X POST 'localhost:8080/tx' \
+curl -i -X POST 'http://localhost:8080/tx' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": 100
-  }'
+  -d '{"id":100}'
 ```
 
-Expected result:
+### Expected response
+
+```http
+HTTP/1.1 202 Accepted
+
+transaction committed
+```
+
+### Example log
+
+Once the transaction is committed, the downstream consumer reads the committed record:
 
 ```text
-HTTP 202
-message is visible to the read_committed consumer
-transaction outcome is commit
+consume committed transaction: topic=sample-tx-topic key="100" msg={ID:100}
 ```
 
-In `franz-go` logs, the transaction should end with:
+## Abort a transaction on error
 
-```text
-commit=true
-```
-
-## Transaction error
-
-Runs transactional publishing and then returns an error from the transaction function.
+The `POST /tx-error` endpoint publishes a record inside a Kafka transaction and then returns an error from the
+transaction callback. The transaction is automatically aborted, so the record is not visible to `read_committed`
+consumers.
 
 ```shell
-curl -v -X POST 'localhost:8080/tx-error' \
+curl -i -X POST 'http://localhost:8080/tx-error' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": 300
-  }'
+  -d '{"id":300}'
 ```
 
-Expected result:
+### Expected response
 
-```text
-HTTP 500
-message is not visible to the read_committed consumer
-transaction outcome is error
+```http
+HTTP/1.1 500 Internal Server Error
+
+forced transaction error
 ```
 
-In `franz-go` logs, the transaction should end with:
+> **Verification:** Because the transaction was aborted, no record with key `"300"` appears in the downstream consumer
+> logs.
 
-```text
-commit=false
-```
+## Abort a transaction on panic
 
-## Transaction panic
-
-Runs transactional publishing and then panics inside the transaction function.
+The `POST /tx-panic` endpoint publishes a record inside a Kafka transaction and then panics from the transaction
+callback. The transaction is automatically aborted before the panic is re-thrown. The HTTP handler recovers from the
+panic to return an error response and keep the example application running.
 
 ```shell
-curl -v -X POST 'localhost:8080/tx-panic' \
+curl -i -X POST 'http://localhost:8080/tx-panic' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": 400
-  }'
+  -d '{"id":400}'
 ```
 
-Expected result:
+### Expected response
 
-```text
-HTTP 500
-message is not visible to the read_committed consumer
-transaction outcome is error
+```http
+HTTP/1.1 500 Internal Server Error
+
+transaction panic: forced transaction panic
 ```
 
-The transaction is aborted before the panic is re-thrown to the HTTP handler.
+> **Verification:** Because the transaction was aborted, no record with key `"400"` appears in the downstream consumer
+> logs.
 
-In `franz-go` logs, the transaction should end with:
+## Stop services
 
-```text
-commit=false
-```
-
-## Metrics
-
-Prometheus metrics are available at:
+From the repository root:
 
 ```shell
-curl 'http://localhost:8080/metrics'
+docker compose -f examples/docker-compose.yml down --remove-orphans -v
 ```
 
-Useful metrics for this example include:
-
-```text
-kafka_produce_errors_total
-kafka_transactions_total
-kafka_transaction_duration_seconds
-kafka_consume_handle_duration_seconds
-kafka_consume_errors_total
-```
-
-Transaction outcomes:
-
-```text
-kafka_transactions_total{outcome="commit"}
-kafka_transactions_total{outcome="error"}
-```
-
-Check transaction metrics:
+Or from this example directory:
 
 ```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_transactions_total'
-```
-
-Check transaction duration metrics:
-
-```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_transaction_duration_seconds'
-```
-
-Check records observed by the consumer handler:
-
-```shell
-curl -s 'http://localhost:8080/metrics' | grep 'kafka_consume_handle_duration_seconds_count'
+docker compose -f ../docker-compose.yml down --remove-orphans -v
 ```
