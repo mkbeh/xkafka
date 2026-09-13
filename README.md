@@ -59,33 +59,33 @@ seeds := []string{"localhost:9092"}
 
 // One client can both produce and consume!
 client, err := xkafka.NewClient(
-	xkafka.WithKafkaOptions(
-		kgo.SeedBrokers(seeds...),
-		kgo.ConsumeTopics("foo"),
-		kgo.ConsumerGroup("my-group-identifier"),
-	),
-	xkafka.WithBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
-		for _, record := range records {
-			fmt.Printf("received: topic=%s key=%s value=%s\n", record.Topic, record.Key, record.Value)
-		}
+    xkafka.WithKafkaOptions(
+        kgo.SeedBrokers(seeds...),
+        kgo.ConsumeTopics("foo"),
+        kgo.ConsumerGroup("my-group-identifier"),
+    ),
+    xkafka.WithBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
+        for _, record := range records {
+            fmt.Printf("received: %s\n", record.Value)
+        }
 
-		return nil
-	}),
+        return nil
+    }),
 )
 if err != nil {
-	panic(err)
+    panic(err)
 }
 defer client.Shutdown(context.Background())
 
 // 1.) Producing a message.
 record := &kgo.Record{Topic: "foo", Value: []byte("value")}
 if err := client.ProduceSync(context.Background(), record); err != nil {
-	panic(err)
+    panic(err)
 }
 
 // 2.) Consuming messages through the configured batch handler.
 if err := client.HandleFetches(context.Background()); err != nil {
-	panic(err)
+    panic(err)
 }
 ```
 
@@ -160,7 +160,7 @@ client, err := xkafka.NewClient(
     xkafka.WithBatchHandler(func(ctx context.Context, records []*kgo.Record) error {
         for _, record := range records {
             // DeliveryCount reports how many times the record has been delivered.
-            fmt.Printf("received: delivery_count=%d key=%s value=%s\n", record.DeliveryCount(), record.Key, record.Value)
+            fmt.Printf("received: %s, delivery_count=%d\n", record.Value, record.DeliveryCount())
         }
 
         // Returning nil acknowledges all records in the batch with AckAccept.
@@ -203,40 +203,40 @@ seeds := []string{"localhost:9092"}
 
 // Initialize a Kafka-to-Kafka exactly-once processing session.
 session, err := xkafka.NewGroupTransactSession(
-	xkafka.WithKafkaOptions(
-		kgo.SeedBrokers(seeds...),
-		kgo.ConsumeTopics("foo-input"),
-		kgo.ConsumerGroup("my-group-identifier"),
-		kgo.TransactionalID("my-tx-identifier"),
-	),
-	xkafka.WithGroupTransactSessionBatchHandler(
-		func(ctx context.Context, records []*kgo.Record, tx *xkafka.Tx) error {
-			for _, record := range records {
-				// 1.) Process the input record and produce the result through Tx.
-				outRecord := &kgo.Record{
-					Topic: "foo-output",
-					Value: record.Value,
-				}
+    xkafka.WithKafkaOptions(
+        kgo.SeedBrokers(seeds...),
+        kgo.ConsumeTopics("foo-input"),
+        kgo.ConsumerGroup("my-group-identifier"),
+        kgo.TransactionalID("my-tx-identifier"),
+    ),
+    xkafka.WithGroupTransactSessionBatchHandler(
+        func(ctx context.Context, records []*kgo.Record, tx *xkafka.Tx) error {
+            for _, record := range records {
+                // 1.) Process the input record and produce the result through Tx.
+                out := &kgo.Record{
+                    Topic: "foo-output",
+                    Value: record.Value,
+                }
 
-				if err := tx.ProduceSync(ctx, outRecord); err != nil {
-					return err
-				}
-			}
+                if err := tx.ProduceSync(ctx, out); err != nil {
+                    return err
+                }
+            }
 
-			// 2.) Returning nil allows the produced records and consumed offsets
-			// to be committed atomically in the same Kafka transaction.
-			return nil
-		},
-	),
+            // 2.) Returning nil allows the produced records and consumed offsets
+            // to be committed atomically in the same Kafka transaction.
+            return nil
+        },
+    ),
 )
 if err != nil {
-	panic(err)
+    panic(err)
 }
 defer session.Shutdown(context.Background())
 
 // Start the blocking transactional processing loop.
 if err := session.HandleFetches(context.Background()); err != nil {
-	panic(err)
+    panic(err)
 }
 ```
 
