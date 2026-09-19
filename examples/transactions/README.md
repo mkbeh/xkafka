@@ -7,7 +7,7 @@ This example demonstrates how to use Kafka transactions for atomic record publis
 * **Creating a transactional producer** for atomic write operations
 * **Committing records atomically** within a transaction
 * **Aborting transactions on errors** returned from transactional processing
-* **Handling panics safely** by aborting the transaction before re-throwing the panic
+* **Handling panics safely** by recovering the panic, aborting the transaction, and returning an error
 * **Reading only committed records** from a downstream consumer
 
 ## Local Kafka setup
@@ -110,8 +110,8 @@ forced transaction error
 ## Abort a transaction on panic
 
 The `POST /tx-panic` endpoint publishes a record inside a Kafka transaction and then panics from the transaction
-callback. The transaction is automatically aborted before the panic is re-thrown. The HTTP handler recovers from the
-panic to return an error response and keep the example application running.
+callback. `xkafka` recovers the panic, attempts to abort the transaction, and returns the recovered panic as an error
+from `RunInTx`.
 
 ```shell
 curl -i -X POST 'http://localhost:8080/tx-panic' \
@@ -124,7 +124,7 @@ curl -i -X POST 'http://localhost:8080/tx-panic' \
 ```http
 HTTP/1.1 500 Internal Server Error
 
-transaction panic: forced transaction panic
+kafka: transaction panic: forced transaction panic
 ```
 
 > **Verification:** Because the transaction was aborted, no record with key `"400"` appears in the downstream consumer

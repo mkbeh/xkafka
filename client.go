@@ -104,8 +104,9 @@ func (c *Client) ProduceSync(ctx context.Context, records ...*kgo.Record) error 
 // error, RunInTx attempts to abort the transaction. Commit failures are handled
 // according to franz-go transaction recovery semantics.
 //
-// If fn panics before the terminal commit begins, RunInTx attempts to abort the
-// transaction and then re-panics with the original value.
+// If fn panics, RunInTx recovers the panic, converts it to an error, and
+// attempts to abort the transaction. If the panic value is an error, the
+// returned error wraps it.
 //
 // Produce transactional records through the [Tx] passed to fn. For
 // consume-process-produce exactly-once workflows, use [GroupTransactSession].
@@ -138,22 +139,8 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 
 	abortOnExit := true
 
-	// Abort the transaction on errors or panics until the terminal commit begins.
+	// Abort the transaction on errors until the terminal commit begins.
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("kafka: transaction panic: %v", r)
-
-			c.cl.log(kgo.LogLevelError, "panic recovered in kafka transaction, aborting", logKeyError, r)
-
-			if abortOnExit {
-				if abortErr := c.abortTransaction(ctx); abortErr == nil {
-					outcome = TransactionOutcomeAbort
-				}
-			}
-
-			panic(r)
-		}
-
 		if abortOnExit && err != nil {
 			if abortErr := c.abortTransaction(ctx); abortErr != nil {
 				err = fmt.Errorf("kafka: transaction failed: %w; abort failed: %w", err, abortErr)
@@ -164,7 +151,7 @@ func (c *Client) RunInTx(ctx context.Context, fn TxFunc) (err error) {
 	}()
 
 	tx := &Tx{cl: c.cl}
-	if err = fn(ctx, tx); err != nil {
+	if err = runTxFunc(ctx, tx, fn); err != nil {
 		return err
 	}
 
@@ -280,6 +267,21 @@ func (c *Client) bindHandler() error {
 	c.cl.handleFetches = c.handleFetchesBatch(c.cl.batchHandler)
 
 	return nil
+}
+
+func runTxFunc(ctx context.Context, tx *Tx, fn TxFunc) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if panicErr, ok := r.(error); ok {
+				err = fmt.Errorf("kafka: transaction panic: %w", panicErr)
+				return
+			}
+
+			err = fmt.Errorf("kafka: transaction panic: %v", r)
+		}
+	}()
+
+	return fn(ctx, tx)
 }
 
 func (c *Client) abortTransaction(ctx context.Context) error {
