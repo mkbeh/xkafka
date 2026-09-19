@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.7.0
+
+### Fixed
+
+* **Producer Transactions:** `RunInTx` now recovers transaction function panics, attempts to abort the active
+  transaction, and returns the panic as an error instead of re-panicking. Panic values that implement `error` are
+  preserved in the returned error chain.
+
+### Changed
+
+* **franz-go:** Updated the core dependency to `v1.22.0`.
+
+---
+
+## extra/otelxkafka/v0.7.0
+
+### Changed
+
+* **xkafka:** Updated the core dependency to `v0.7.0`.
+* **franz-go:** Updated the dependency to `v1.22.0`.
+
+---
+
 ## v0.6.0
 
 Initial production release of `xkafka`, introducing a compact runtime layer built directly on top of `franz-go`.
