@@ -185,16 +185,6 @@ func transactionErrorHandler(client *xkafka.Client) http.HandlerFunc {
 
 func transactionPanicHandler(client *xkafka.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				http.Error(
-					w,
-					fmt.Sprintf("transaction panic: %v", recovered),
-					http.StatusInternalServerError,
-				)
-			}
-		}()
-
 		msg, err := decodeMessage(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

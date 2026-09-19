@@ -138,7 +138,7 @@ The transaction function controls how `xkafka` completes the transaction:
 |:---------------:|------------------------------------------------------------------|
 | `nil`           | Flushes buffered records and attempts to commit the transaction. |
 | `error`         | Attempts to abort the transaction and returns the error.         |
-| `panic`         | Attempts to abort the transaction before re-throwing the panic.  |
+| `panic`         | Recovers the panic, attempts to abort the transaction, and returns an error. |
 
 ## Share Groups
 

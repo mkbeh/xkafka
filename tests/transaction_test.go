@@ -250,26 +250,18 @@ func TestClientRunInTxPanic(t *testing.T) {
 		WithHooks(hook),
 	)
 
-	var recovered any
-	func() {
-		defer func() {
-			recovered = recover()
-		}()
+	err := client.RunInTx(context.Background(), func(ctx context.Context, tx *Tx) error {
+		if err := tx.ProduceSync(ctx, &kgo.Record{
+			Topic: topic,
+			Value: []byte("aborted-panic"),
+		}); err != nil {
+			return err
+		}
 
-		_ = client.RunInTx(context.Background(), func(ctx context.Context, tx *Tx) error {
-			if err := tx.ProduceSync(ctx, &kgo.Record{
-				Topic: topic,
-				Value: []byte("aborted-panic"),
-			}); err != nil {
-				return err
-			}
-
-			panic("boom")
-		})
-	}()
-
-	if recovered != "boom" {
-		t.Fatalf("recovered panic = %#v, want %q", recovered, "boom")
+		panic("boom")
+	})
+	if err == nil || !strings.Contains(err.Error(), "kafka: transaction panic: boom") {
+		t.Fatalf("run transaction error = %v, want recovered panic error", err)
 	}
 
 	state := hook.snapshot()
@@ -285,6 +277,62 @@ func TestClientRunInTxPanic(t *testing.T) {
 	}
 	if end.err == nil || !strings.Contains(end.err.Error(), "kafka: transaction panic: boom") {
 		t.Fatalf("transaction end error = %v, want recovered panic error", end.err)
+	}
+
+	assertNoCommittedTestRecords(t, cluster, topic)
+
+	if err := client.RunInTx(context.Background(), func(ctx context.Context, tx *Tx) error {
+		return tx.ProduceSync(ctx, &kgo.Record{
+			Topic: topic,
+			Value: []byte("committed-after-panic"),
+		})
+	}); err != nil {
+		t.Fatalf("run transaction after panic: %v", err)
+	}
+
+	consumed := consumeCommittedTestRecords(t, cluster, topic, 1)[0]
+	if string(consumed.Value) != "committed-after-panic" {
+		t.Fatalf("committed record value = %q, want committed-after-panic", consumed.Value)
+	}
+}
+
+func TestClientRunInTxPanicError(t *testing.T) {
+	const topic = "run-in-tx-panic-error"
+
+	cluster := newTestKafkaCluster(t, topic)
+	hook := &runInTxHook{}
+	client := newTestClient(
+		t,
+		cluster,
+		WithKafkaOptions(kgo.TransactionalID("xkafka-run-in-tx-panic-error")),
+		WithHooks(hook),
+	)
+
+	panicErr := errors.New("boom")
+	err := client.RunInTx(context.Background(), func(ctx context.Context, tx *Tx) error {
+		if err := tx.ProduceSync(ctx, &kgo.Record{
+			Topic: topic,
+			Value: []byte("aborted-panic-error"),
+		}); err != nil {
+			return err
+		}
+
+		panic(panicErr)
+	})
+	if !errors.Is(err, panicErr) {
+		t.Fatalf("run transaction error = %v, want wrapped panic error %v", err, panicErr)
+	}
+
+	state := hook.snapshot()
+	if len(state.endEvents) != 1 {
+		t.Fatalf("transaction end calls = %d, want 1", len(state.endEvents))
+	}
+	end := state.endEvents[0]
+	if end.outcome != TransactionOutcomeAbort {
+		t.Fatalf("transaction outcome = %q, want %q", end.outcome, TransactionOutcomeAbort)
+	}
+	if !errors.Is(end.err, panicErr) {
+		t.Fatalf("transaction end error = %v, want wrapped panic error %v", end.err, panicErr)
 	}
 
 	assertNoCommittedTestRecords(t, cluster, topic)

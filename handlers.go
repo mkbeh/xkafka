@@ -11,7 +11,8 @@ type (
 	//
 	// Returning nil allows [Client.RunInTx] to attempt to commit the transaction.
 	// Returning an error causes [Client.RunInTx] to attempt to abort the
-	// transaction.
+	// transaction. Panics are recovered and handled as errors. If the panic
+	// value is an error, the returned error wraps it.
 	TxFunc func(ctx context.Context, tx *Tx) error
 
 	// PromiseFunc is called when an asynchronous produce operation completes.
